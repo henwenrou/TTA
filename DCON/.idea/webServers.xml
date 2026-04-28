@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="WebServers">
+    <option name="servers">
+      <webServer id="89bbee96-a781-45c3-bb62-34b0e176dc21" name="DCON">
+        <fileTransfer rootFolder="/root/DCON" accessType="SFTP" host="link.lanyun.net" port="25432" sshConfigId="3e6aa13b-ea4e-4a8e-975e-a56167457145" sshConfig="root@link.lanyun.net:25432 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+      <webServer id="24214c60-1c93-4632-bd50-996eab0e5ddd" name="DCON2">
+        <fileTransfer rootFolder="/root/DCON" accessType="SFTP" host="link.lanyun.net" port="24970" sshConfigId="2b7fd214-6e36-4bf6-9df7-5220a0fad00e" sshConfig="root@link.lanyun.net:24970 password">
+          <advancedOptions>
+            <advancedOptions dataProtectionLevel="Private" keepAliveTimeout="0" passiveMode="true" shareSSLContext="true" />
+          </advancedOptions>
+        </fileTransfer>
+      </webServer>
+    </option>
+  </component>
+</project>

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SshConfigs">
+    <configs>
+      <sshConfig authType="PASSWORD" host="link.lanyun.net" id="51d4aa4b-f354-47dc-b166-3fe29d6a39a3" port="37167" nameFormat="DESCRIPTIVE" username="root" useOpenSSHConfig="true" />
+      <sshConfig authType="PASSWORD" host="link.lanyun.net" id="3e6aa13b-ea4e-4a8e-975e-a56167457145" port="25432" nameFormat="DESCRIPTIVE" username="root" useOpenSSHConfig="true" />
+      <sshConfig authType="PASSWORD" host="link.lanyun.net" id="2b7fd214-6e36-4bf6-9df7-5220a0fad00e" port="24970" nameFormat="DESCRIPTIVE" username="root" useOpenSSHConfig="true" />
+    </configs>
+  </component>
+</project>

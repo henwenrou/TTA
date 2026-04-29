@@ -2,10 +2,13 @@
 
 import torch
 from collections import OrderedDict
+from copy import deepcopy
 import numpy as np
 import os
+import random
 import models.segloss as segloss
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.autograd import Variable
 
 from .unet import *
@@ -44,6 +47,60 @@ def collect_bn_affine_params(model):
                     params.append(param)
                     names.append(f"{module_name}.{param_name}")
     return params, names
+
+
+class AlphaBatchNorm2d(nn.Module):
+    """Blend source BatchNorm statistics with current test-batch statistics."""
+    def __init__(self, layer, alpha):
+        super().__init__()
+        if not isinstance(layer, nn.BatchNorm2d):
+            raise TypeError(f"Expected BatchNorm2d, got {type(layer)}")
+        if not 0.0 <= alpha <= 1.0:
+            raise ValueError(f"alpha must be in [0, 1], got {alpha}")
+        self.layer = layer
+        self.alpha = float(alpha)
+
+    def forward(self, x):
+        dims = (0, 2, 3)
+        batch_mean = x.mean(dim=dims)
+        batch_var = x.var(dim=dims, unbiased=False)
+        running_mean = (1.0 - self.alpha) * self.layer.running_mean + self.alpha * batch_mean
+        running_var = (1.0 - self.alpha) * self.layer.running_var + self.alpha * batch_var
+        return F.batch_norm(
+            x,
+            running_mean,
+            running_var,
+            self.layer.weight,
+            self.layer.bias,
+            training=False,
+            momentum=0.0,
+            eps=self.layer.eps,
+        )
+
+
+def replace_bn_with_alpha_bn(module, alpha):
+    replaced = 0
+    for name, child in module.named_children():
+        if isinstance(child, nn.BatchNorm2d):
+            setattr(module, name, AlphaBatchNorm2d(child, alpha))
+            replaced += 1
+        else:
+            replaced += replace_bn_with_alpha_bn(child, alpha)
+    return replaced
+
+
+def forward_logits(model, images):
+    output = model(images)
+    if isinstance(output, (tuple, list)):
+        return output[0]
+    return output
+
+
+@torch.no_grad()
+def update_ema_model(ema_model, model, momentum):
+    for ema_param, param in zip(ema_model.parameters(), model.parameters()):
+        ema_param.data.mul_(momentum).add_(param.data, alpha=1.0 - momentum)
+    return ema_model
 
 
 class Train_process():
@@ -292,8 +349,34 @@ class Train_process():
         self.tta_mode = getattr(opt, 'tta', 'none')
         self.tent_optimizer = None
         self.tent_param_names = []
-        if istest == 1 and self.tta_mode == 'tent':
-            self.configure_tent()
+        self.cotta_optimizer = None
+        self.cotta_model_ema = None
+        self.cotta_model_anchor = None
+        self.cotta_source_state = None
+        if istest == 1:
+            if self.tta_mode == 'tent':
+                self.configure_tent()
+            elif self.tta_mode == 'norm_test':
+                self.configure_alpha_norm(alpha=1.0)
+            elif self.tta_mode == 'norm_alpha':
+                self.configure_alpha_norm(alpha=getattr(self.opt, 'bn_alpha', 0.1))
+            elif self.tta_mode == 'norm_ema':
+                self.configure_norm_ema()
+            elif self.tta_mode == 'cotta':
+                self.configure_cotta()
+
+    def configure_alpha_norm(self, alpha):
+        replaced = replace_bn_with_alpha_bn(self.netseg, alpha)
+        if replaced == 0:
+            raise RuntimeError(f"{self.tta_mode} requires BatchNorm2d layers, but none were found.")
+        self.netseg.eval()
+        print(f"{self.tta_mode} enabled: replaced {replaced} BatchNorm2d layers with alpha={alpha}")
+
+    def configure_norm_ema(self):
+        if not any(isinstance(m, nn.BatchNorm2d) for m in self.netseg.modules()):
+            raise RuntimeError("norm_ema requires BatchNorm2d layers, but none were found.")
+        self.netseg.train()
+        print("norm_ema enabled: updating BatchNorm running statistics online")
 
     def configure_tent(self):
         configure_model_for_tent(self.netseg)
@@ -312,6 +395,94 @@ class Train_process():
         for name in names:
             print(f"  - {name}")
 
+    def configure_cotta(self):
+        self.netseg.train()
+        for param in self.netseg.parameters():
+            param.requires_grad_(True)
+
+        self.cotta_optimizer = torch.optim.Adam(
+            [p for p in self.netseg.parameters() if p.requires_grad],
+            lr=getattr(self.opt, 'cotta_lr', 1e-4),
+            betas=(0.9, 0.999),
+            weight_decay=0.0,
+        )
+
+        self.cotta_model_ema = deepcopy(self.netseg)
+        self.cotta_model_anchor = deepcopy(self.netseg)
+        for model in (self.cotta_model_ema, self.cotta_model_anchor):
+            model.eval()
+            for param in model.parameters():
+                param.detach_()
+                param.requires_grad_(False)
+
+        self.cotta_source_state = deepcopy(self.netseg.state_dict())
+        print(
+            "CoTTA enabled: "
+            f"lr={getattr(self.opt, 'cotta_lr', 1e-4)}, "
+            f"steps={getattr(self.opt, 'cotta_steps', 1)}, "
+            f"mt={getattr(self.opt, 'cotta_mt', 0.999)}, "
+            f"rst={getattr(self.opt, 'cotta_rst', 0.01)}, "
+            f"ap={getattr(self.opt, 'cotta_ap', 0.9)}"
+        )
+
+    @torch.no_grad()
+    def cotta_ensemble_prediction(self, images, ema_logits):
+        inp_shape = images.shape[2:]
+        ratios = [0.5, 0.75, 1.0, 1.25, 1.5, 1.75]
+        for ratio in ratios:
+            aug_shape = (
+                max(1, int(inp_shape[0] * ratio)),
+                max(1, int(inp_shape[1] * ratio)),
+            )
+            flip = [random.random() <= 0.5 for _ in range(images.shape[0])]
+            aug_images = torch.cat(
+                [images[i:i + 1].flip(dims=(3,)) if fp else images[i:i + 1]
+                 for i, fp in enumerate(flip)],
+                dim=0,
+            )
+            aug_images = F.interpolate(aug_images, size=aug_shape, mode='bilinear', align_corners=False)
+            aug_logits = forward_logits(self.cotta_model_ema, aug_images)
+            aug_logits = torch.cat(
+                [aug_logits[i:i + 1].flip(dims=(3,)) if fp else aug_logits[i:i + 1]
+                 for i, fp in enumerate(flip)],
+                dim=0,
+            )
+            ema_logits = ema_logits + F.interpolate(aug_logits, size=inp_shape, mode='bilinear', align_corners=False)
+        return ema_logits / float(len(ratios) + 1)
+
+    @torch.no_grad()
+    def cotta_stochastic_restore(self):
+        rst = getattr(self.opt, 'cotta_rst', 0.01)
+        if rst <= 0.0:
+            return
+        for name, param in self.netseg.named_parameters():
+            if not param.requires_grad or name not in self.cotta_source_state:
+                continue
+            if not (name.endswith('weight') or name.endswith('bias')):
+                continue
+            mask = torch.rand_like(param, dtype=torch.float32) < rst
+            source_param = self.cotta_source_state[name].to(param.device)
+            param.data.copy_(torch.where(mask, source_param, param.data))
+
+    def te_func_norm(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.tta_mode == 'norm_ema':
+            self.netseg.train()
+            with torch.no_grad():
+                _ = forward_logits(self.netseg, self.input_img_te)
+            self.netseg.eval()
+        else:
+            self.netseg.eval()
+
+        with torch.no_grad():
+            logits = forward_logits(self.netseg, self.input_img_te)
+            seg = torch.argmax(logits, 1)
+
+        self.netseg.zero_grad()
+        return self.input_mask_te, seg
+
     @torch.enable_grad()
     def te_func_tent(self, input):
         self.input_img_te = input['image'].float().cuda()
@@ -324,7 +495,7 @@ class Train_process():
         loss = None
         self.netseg.train()
         for _ in range(getattr(self.opt, 'tent_steps', 1)):
-            logits, _ = self.netseg(self.input_img_te)
+            logits = forward_logits(self.netseg, self.input_img_te)
             loss = softmax_entropy_seg(logits)
             self.tent_optimizer.zero_grad()
             loss.backward()
@@ -335,9 +506,50 @@ class Train_process():
         self.last_tent_loss = loss.detach() if loss is not None else None
         return self.input_mask_te, seg
 
+    @torch.enable_grad()
+    def te_func_cotta(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.cotta_optimizer is None:
+            raise RuntimeError("CoTTA optimizer is not initialized. Call configure_cotta() first.")
+
+        self.netseg.train()
+        outputs_ema = None
+        for _ in range(getattr(self.opt, 'cotta_steps', 1)):
+            outputs = forward_logits(self.netseg, self.input_img_te)
+
+            with torch.no_grad():
+                anchor_logits = forward_logits(self.cotta_model_anchor, self.input_img_te)
+                anchor_prob = torch.softmax(anchor_logits, dim=1).max(dim=1)[0]
+                outputs_ema = forward_logits(self.cotta_model_ema, self.input_img_te)
+                if anchor_prob.mean() < getattr(self.opt, 'cotta_ap', 0.9):
+                    outputs_ema = self.cotta_ensemble_prediction(self.input_img_te, outputs_ema)
+
+            loss = (-(outputs_ema.softmax(1) * outputs.log_softmax(1)).sum(1)).mean()
+            self.cotta_optimizer.zero_grad()
+            loss.backward()
+            self.cotta_optimizer.step()
+
+            update_ema_model(self.cotta_model_ema, self.netseg, getattr(self.opt, 'cotta_mt', 0.999))
+            self.cotta_stochastic_restore()
+
+        with torch.no_grad():
+            final_logits = forward_logits(self.cotta_model_ema, self.input_img_te)
+            seg = torch.argmax(final_logits, 1)
+
+        self.netseg.zero_grad()
+        self.last_cotta_loss = loss.detach()
+        return self.input_mask_te, seg
+
     def te_func(self,input):
-        if getattr(self.opt, 'tta', 'none') == 'tent':
+        tta_mode = getattr(self.opt, 'tta', 'none')
+        if tta_mode == 'tent':
             return self.te_func_tent(input)
+        if tta_mode in ['norm_test', 'norm_alpha', 'norm_ema']:
+            return self.te_func_norm(input)
+        if tta_mode == 'cotta':
+            return self.te_func_cotta(input)
 
         self.input_img_te = input['image'].float().cuda()
         self.input_mask_te = input['label'].float().cuda()
@@ -346,7 +558,7 @@ class Train_process():
 
         with torch.no_grad():
             img,mask= self.input_img_te,self.input_mask_te
-            seg, tmp= self.netseg(img)
+            seg = forward_logits(self.netseg, img)
             seg = torch.argmax(seg, 1)
 
         self.netseg.zero_grad()

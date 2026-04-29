@@ -45,6 +45,7 @@ run_tent() {
 run_tent "tent_dcon_sc_sabsct" "ABDOMINAL" 5 "SABSCT" "../ckpts/dcon-sc-300.pth"
 run_tent "tent_dcon_cs_chaost2" "ABDOMINAL" 5 "CHAOST2" "../ckpts/dcon-cs-200.pth"
 run_tent "tent_dcon_bl_bssfp" "CARDIAC" 4 "bSSFP" "../ckpts/dcon-bl-1200.pth"
+run_tent "tent_dcon_lb_lge" "CARDIAC" 4 "LGE" "../ckpts/dcon-lb-500.pth"
 
 echo "=========================================="
 echo "TENT source-only DCON evaluations completed!"

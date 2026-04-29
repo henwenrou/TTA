@@ -287,12 +287,25 @@ def get_args():
     parser.add_argument('--nclass', type=int, default=4, help='nclass')
     parser.add_argument('--tr_domain', type=str, default='bSSFP', help='src_domain')
     parser.add_argument('--save_prediction', type=bool, default=True, help='save_pred')
-    parser.add_argument('--tta', type=str, default='none', choices=['none', 'tent'],
-                        help='Test-time adaptation method. Use "tent" for BN-affine entropy minimization.')
+    parser.add_argument('--tta', type=str, default='none',
+                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'cotta'],
+                        help='Test-time adaptation method.')
+    parser.add_argument('--bn_alpha', type=float, default=0.1,
+                        help='Source/test BN-stat mixing coefficient for norm_alpha.')
     parser.add_argument('--tent_lr', type=float, default=1e-4,
                         help='Learning rate for TENT BN affine updates.')
     parser.add_argument('--tent_steps', type=int, default=1,
                         help='Number of TENT adaptation steps per test batch.')
+    parser.add_argument('--cotta_lr', type=float, default=1e-4,
+                        help='Learning rate for CoTTA online updates.')
+    parser.add_argument('--cotta_steps', type=int, default=1,
+                        help='Number of CoTTA adaptation steps per test batch.')
+    parser.add_argument('--cotta_mt', type=float, default=0.999,
+                        help='EMA teacher momentum for CoTTA.')
+    parser.add_argument('--cotta_rst', type=float, default=0.01,
+                        help='Stochastic restore probability for CoTTA.')
+    parser.add_argument('--cotta_ap', type=float, default=0.9,
+                        help='Anchor confidence threshold for CoTTA augmentation ensembling.')
 
     parser.add_argument('--validation_freq', type=int, default=10, help='valfreq')
     parser.add_argument('--display_freq', type=int, default=500, help='imgfreq')
@@ -428,6 +441,12 @@ def get_args():
         raise ValueError(f"Invalid tent_steps={args.tent_steps}. Must be >= 1")
     if args.tent_lr <= 0:
         raise ValueError(f"Invalid tent_lr={args.tent_lr}. Must be > 0")
+    if args.cotta_steps < 1:
+        raise ValueError(f"Invalid cotta_steps={args.cotta_steps}. Must be >= 1")
+    if args.cotta_lr <= 0:
+        raise ValueError(f"Invalid cotta_lr={args.cotta_lr}. Must be > 0")
+    if not (0.0 <= args.bn_alpha <= 1.0):
+        raise ValueError(f"Invalid bn_alpha={args.bn_alpha}. Must be in [0, 1]")
     if args.phase != 'test' and args.tta != 'none':
         raise ValueError("TTA is only supported with --phase test in this DCON entry point.")
 
@@ -540,6 +559,14 @@ if __name__ == '__main__':
     if opt.tta == 'tent':
         logging.info("tent_lr:"+str(opt.tent_lr))
         logging.info("tent_steps:"+str(opt.tent_steps))
+    elif opt.tta == 'norm_alpha':
+        logging.info("bn_alpha:"+str(opt.bn_alpha))
+    elif opt.tta == 'cotta':
+        logging.info("cotta_lr:"+str(opt.cotta_lr))
+        logging.info("cotta_steps:"+str(opt.cotta_steps))
+        logging.info("cotta_mt:"+str(opt.cotta_mt))
+        logging.info("cotta_rst:"+str(opt.cotta_rst))
+        logging.info("cotta_ap:"+str(opt.cotta_ap))
     
     tb_writer = SummaryWriter( tbfile_dir  )
 
@@ -627,6 +654,10 @@ if __name__ == '__main__':
         print(f"TTA: {opt.tta}")
         if opt.tta == 'tent':
             print(f"TENT config: lr={opt.tent_lr}, steps={opt.tent_steps}")
+        elif opt.tta == 'norm_alpha':
+            print(f"norm_alpha config: alpha={opt.bn_alpha}")
+        elif opt.tta == 'cotta':
+            print(f"CoTTA config: lr={opt.cotta_lr}, steps={opt.cotta_steps}, mt={opt.cotta_mt}, rst={opt.cotta_rst}, ap={opt.cotta_ap}")
         print(f"{'='*80}\n")
 
         # Determine checkpoint path
@@ -677,8 +708,8 @@ if __name__ == '__main__':
             print("\n" + "="*80)
             print("Testing on source domain...")
             print("="*80)
-            if opt.tta == 'tent':
-                print("Reloading checkpoint before source-domain evaluation to avoid carrying target TENT state.")
+            if opt.tta != 'none':
+                print(f"Reloading checkpoint before source-domain evaluation to avoid carrying target {opt.tta} state.")
                 model = Train_process(opt, reloaddir=reload_model_fid, istest=1)
             with open(finalfile, 'a') as f:
                 f.write("\n\nTest on source domain\n")
@@ -886,8 +917,8 @@ if __name__ == '__main__':
                         break
                     
             print('\ntest for source domain')
-            if opt.tta == 'tent':
-                print("Reloading checkpoint before source-domain evaluation to avoid carrying target TENT state.")
+            if opt.tta != 'none':
+                print(f"Reloading checkpoint before source-domain evaluation to avoid carrying target {opt.tta} state.")
                 model1 = Train_process(opt, reloaddir=reload_model_fid, istest=1)
             with open(finalfile, 'a') as f:
                  f.write("\n\ntest for source domain \n")          

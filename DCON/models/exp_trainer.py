@@ -14,6 +14,7 @@ from torch.autograd import Variable
 from .unet import *
 from .sgf import get_sgf_map
 from .saam import StabilityAwareAlignmentModule, compute_saam_loss
+from tta_memo import build_memo_batch, marginal_entropy
 import sys
 sys.path.append('..')
 from dataloaders.rccs import ProRandConvNet, RandomConvCandidateSelection, RCCSFeatureEncoder
@@ -353,6 +354,7 @@ class Train_process():
         self.cotta_model_ema = None
         self.cotta_model_anchor = None
         self.cotta_source_state = None
+        self.memo_optimizer = None
         if istest == 1:
             if self.tta_mode == 'tent':
                 self.configure_tent()
@@ -364,6 +366,8 @@ class Train_process():
                 self.configure_norm_ema()
             elif self.tta_mode == 'cotta':
                 self.configure_cotta()
+            elif self.tta_mode == 'memo':
+                self.configure_memo()
 
     def configure_alpha_norm(self, alpha):
         replaced = replace_bn_with_alpha_bn(self.netseg, alpha)
@@ -423,6 +427,44 @@ class Train_process():
             f"mt={getattr(self.opt, 'cotta_mt', 0.999)}, "
             f"rst={getattr(self.opt, 'cotta_rst', 0.01)}, "
             f"ap={getattr(self.opt, 'cotta_ap', 0.9)}"
+        )
+
+    def configure_memo(self):
+        update_scope = getattr(self.opt, 'memo_update_scope', 'all')
+        self.netseg.train()
+        self.netseg.requires_grad_(False)
+
+        if update_scope == 'bn_affine':
+            params, names = collect_bn_affine_params(self.netseg)
+            if len(params) == 0:
+                raise RuntimeError("MEMO bn_affine mode requires BatchNorm2d affine parameters, but none were found.")
+            for param in params:
+                param.requires_grad_(True)
+            print(f"MEMO enabled: updating {len(params)} BatchNorm affine tensors")
+            for name in names:
+                print(f"  - {name}")
+        elif update_scope == 'all':
+            params = list(self.netseg.parameters())
+            for param in params:
+                param.requires_grad_(True)
+            print(f"MEMO enabled: updating all segmentation parameters ({len(params)} tensors)")
+        else:
+            raise ValueError(f"Unknown memo_update_scope: {update_scope}")
+
+        self.memo_optimizer = torch.optim.Adam(
+            params,
+            lr=getattr(self.opt, 'memo_lr', 1e-5),
+            betas=(0.9, 0.999),
+            weight_decay=0.0,
+        )
+        print(
+            "MEMO config: "
+            f"lr={getattr(self.opt, 'memo_lr', 1e-5)}, "
+            f"steps={getattr(self.opt, 'memo_steps', 1)}, "
+            f"n_aug={getattr(self.opt, 'memo_n_augmentations', 8)}, "
+            f"include_identity={getattr(self.opt, 'memo_include_identity', 1)}, "
+            f"hflip_p={getattr(self.opt, 'memo_hflip_p', 0.0)}, "
+            f"scope={update_scope}"
         )
 
     @torch.no_grad()
@@ -542,6 +584,37 @@ class Train_process():
         self.last_cotta_loss = loss.detach()
         return self.input_mask_te, seg
 
+    @torch.enable_grad()
+    def te_func_memo(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.memo_optimizer is None:
+            raise RuntimeError("MEMO optimizer is not initialized. Call configure_memo() first.")
+
+        self.netseg.train()
+        loss = None
+        for _ in range(getattr(self.opt, 'memo_steps', 1)):
+            memo_batch = build_memo_batch(
+                self.input_img_te,
+                n_augmentations=getattr(self.opt, 'memo_n_augmentations', 8),
+                include_identity=bool(getattr(self.opt, 'memo_include_identity', 1)),
+                hflip_p=getattr(self.opt, 'memo_hflip_p', 0.0),
+            )
+            outputs = forward_logits(self.netseg, memo_batch)
+            loss = marginal_entropy(outputs)
+            self.memo_optimizer.zero_grad()
+            loss.backward()
+            self.memo_optimizer.step()
+
+        with torch.no_grad():
+            final_logits = forward_logits(self.netseg, self.input_img_te)
+            seg = torch.argmax(final_logits, 1)
+
+        self.netseg.zero_grad()
+        self.last_memo_loss = loss.detach() if loss is not None else None
+        return self.input_mask_te, seg
+
     def te_func(self,input):
         tta_mode = getattr(self.opt, 'tta', 'none')
         if tta_mode == 'tent':
@@ -550,6 +623,8 @@ class Train_process():
             return self.te_func_norm(input)
         if tta_mode == 'cotta':
             return self.te_func_cotta(input)
+        if tta_mode == 'memo':
+            return self.te_func_memo(input)
 
         self.input_img_te = input['image'].float().cuda()
         self.input_mask_te = input['label'].float().cuda()

@@ -288,7 +288,7 @@ def get_args():
     parser.add_argument('--tr_domain', type=str, default='bSSFP', help='src_domain')
     parser.add_argument('--save_prediction', type=bool, default=True, help='save_pred')
     parser.add_argument('--tta', type=str, default='none',
-                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'cotta'],
+                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'cotta', 'memo'],
                         help='Test-time adaptation method.')
     parser.add_argument('--bn_alpha', type=float, default=0.1,
                         help='Source/test BN-stat mixing coefficient for norm_alpha.')
@@ -306,6 +306,18 @@ def get_args():
                         help='Stochastic restore probability for CoTTA.')
     parser.add_argument('--cotta_ap', type=float, default=0.9,
                         help='Anchor confidence threshold for CoTTA augmentation ensembling.')
+    parser.add_argument('--memo_lr', type=float, default=1e-5,
+                        help='Learning rate for MEMO online updates.')
+    parser.add_argument('--memo_steps', type=int, default=1,
+                        help='Number of MEMO adaptation steps per test batch.')
+    parser.add_argument('--memo_n_augmentations', type=int, default=8,
+                        help='Number of medical MEMO views per test slice.')
+    parser.add_argument('--memo_include_identity', type=int, default=1,
+                        help='Include the unaugmented image as one MEMO view: 1=on, 0=off.')
+    parser.add_argument('--memo_hflip_p', type=float, default=0.0,
+                        help='Optional horizontal flip probability for MEMO. Default 0 for conservative medical TTA.')
+    parser.add_argument('--memo_update_scope', type=str, default='all', choices=['all', 'bn_affine'],
+                        help='Parameters updated by MEMO.')
 
     parser.add_argument('--validation_freq', type=int, default=10, help='valfreq')
     parser.add_argument('--display_freq', type=int, default=500, help='imgfreq')
@@ -445,6 +457,16 @@ def get_args():
         raise ValueError(f"Invalid cotta_steps={args.cotta_steps}. Must be >= 1")
     if args.cotta_lr <= 0:
         raise ValueError(f"Invalid cotta_lr={args.cotta_lr}. Must be > 0")
+    if args.memo_steps < 1:
+        raise ValueError(f"Invalid memo_steps={args.memo_steps}. Must be >= 1")
+    if args.memo_lr <= 0:
+        raise ValueError(f"Invalid memo_lr={args.memo_lr}. Must be > 0")
+    if args.memo_n_augmentations < 1:
+        raise ValueError(f"Invalid memo_n_augmentations={args.memo_n_augmentations}. Must be >= 1")
+    if args.memo_include_identity not in [0, 1]:
+        raise ValueError(f"Invalid memo_include_identity={args.memo_include_identity}. Must be 0 or 1")
+    if not (0.0 <= args.memo_hflip_p <= 1.0):
+        raise ValueError(f"Invalid memo_hflip_p={args.memo_hflip_p}. Must be in [0, 1]")
     if not (0.0 <= args.bn_alpha <= 1.0):
         raise ValueError(f"Invalid bn_alpha={args.bn_alpha}. Must be in [0, 1]")
     if args.phase != 'test' and args.tta != 'none':
@@ -567,6 +589,13 @@ if __name__ == '__main__':
         logging.info("cotta_mt:"+str(opt.cotta_mt))
         logging.info("cotta_rst:"+str(opt.cotta_rst))
         logging.info("cotta_ap:"+str(opt.cotta_ap))
+    elif opt.tta == 'memo':
+        logging.info("memo_lr:"+str(opt.memo_lr))
+        logging.info("memo_steps:"+str(opt.memo_steps))
+        logging.info("memo_n_augmentations:"+str(opt.memo_n_augmentations))
+        logging.info("memo_include_identity:"+str(opt.memo_include_identity))
+        logging.info("memo_hflip_p:"+str(opt.memo_hflip_p))
+        logging.info("memo_update_scope:"+str(opt.memo_update_scope))
     
     tb_writer = SummaryWriter( tbfile_dir  )
 
@@ -658,6 +687,15 @@ if __name__ == '__main__':
             print(f"norm_alpha config: alpha={opt.bn_alpha}")
         elif opt.tta == 'cotta':
             print(f"CoTTA config: lr={opt.cotta_lr}, steps={opt.cotta_steps}, mt={opt.cotta_mt}, rst={opt.cotta_rst}, ap={opt.cotta_ap}")
+        elif opt.tta == 'memo':
+            print(
+                "MEMO config: "
+                f"lr={opt.memo_lr}, steps={opt.memo_steps}, "
+                f"n_aug={opt.memo_n_augmentations}, "
+                f"include_identity={opt.memo_include_identity}, "
+                f"hflip_p={opt.memo_hflip_p}, "
+                f"scope={opt.memo_update_scope}"
+            )
         print(f"{'='*80}\n")
 
         # Determine checkpoint path

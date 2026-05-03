@@ -303,7 +303,7 @@ def get_args():
                         type=str, default=None, help='Optional explicit target domain.')
     parser.add_argument('--save_prediction', type=bool, default=True, help='save_pred')
     parser.add_argument('--tta', type=str, default='none',
-                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'cotta', 'memo', 'asm', 'sm_ppm', 'gold'],
+                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'cotta', 'memo', 'asm', 'sm_ppm', 'gtta', 'gold'],
                         help='Test-time adaptation method.')
     parser.add_argument('--bn_alpha', type=float, default=0.1,
                         help='Source/test BN-stat mixing coefficient for norm_alpha.')
@@ -366,6 +366,26 @@ def get_args():
                         help='Spatial size used before target feature patching for SM-PPM.')
     parser.add_argument('--smppm_episodic', type=str2bool, nargs='?', const=True, default=False,
                         help='Reset model and optimizer before each SM-PPM target batch.')
+    parser.add_argument('--gtta_lr', type=float, default=2.5e-4,
+                        help='Learning rate for GTTA supervised source and target pseudo-label updates.')
+    parser.add_argument('--gtta_momentum', type=float, default=0.9,
+                        help='SGD momentum for GTTA updates.')
+    parser.add_argument('--gtta_wd', type=float, default=5e-4,
+                        help='Weight decay for GTTA updates.')
+    parser.add_argument('--gtta_steps', type=int, default=1,
+                        help='Number of GTTA adaptation steps per target batch.')
+    parser.add_argument('--gtta_src_batch_size', type=int, default=2,
+                        help='Source-domain labeled batch size for GTTA.')
+    parser.add_argument('--gtta_lambda_ce_trg', type=float, default=0.1,
+                        help='Weight for GTTA target pseudo-label cross-entropy.')
+    parser.add_argument('--gtta_pseudo_momentum', type=float, default=0.9,
+                        help='Momentum for GTTA running target pseudo-label confidence threshold.')
+    parser.add_argument('--gtta_style_alpha', type=float, default=1.0,
+                        help='Blend weight for GTTA class-aware tensor-space AdaIN style transfer.')
+    parser.add_argument('--gtta_include_original', type=int, default=1,
+                        help='Train GTTA source step on both stylized and original source images: 1=on, 0=off.')
+    parser.add_argument('--gtta_episodic', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset model and optimizer before each GTTA target batch.')
     parser.add_argument('--gold_lr', type=float, default=2.5e-4,
                         help='Learning rate for GOLD student model updates.')
     parser.add_argument('--gold_momentum', type=float, default=0.9,
@@ -583,6 +603,24 @@ def get_args():
         raise ValueError("smppm_feature_size must be >= smppm_patch_size")
     if args.smppm_feature_size % args.smppm_patch_size != 0:
         raise ValueError("smppm_feature_size must be divisible by smppm_patch_size")
+    if args.gtta_lr <= 0:
+        raise ValueError(f"Invalid gtta_lr={args.gtta_lr}. Must be > 0")
+    if args.gtta_momentum < 0:
+        raise ValueError(f"Invalid gtta_momentum={args.gtta_momentum}. Must be >= 0")
+    if args.gtta_wd < 0:
+        raise ValueError(f"Invalid gtta_wd={args.gtta_wd}. Must be >= 0")
+    if args.gtta_steps < 1:
+        raise ValueError(f"Invalid gtta_steps={args.gtta_steps}. Must be >= 1")
+    if args.gtta_src_batch_size < 1:
+        raise ValueError(f"Invalid gtta_src_batch_size={args.gtta_src_batch_size}. Must be >= 1")
+    if args.gtta_lambda_ce_trg < 0:
+        raise ValueError(f"Invalid gtta_lambda_ce_trg={args.gtta_lambda_ce_trg}. Must be >= 0")
+    if not (0.0 <= args.gtta_pseudo_momentum <= 1.0):
+        raise ValueError(f"Invalid gtta_pseudo_momentum={args.gtta_pseudo_momentum}. Must be in [0, 1]")
+    if not (0.0 <= args.gtta_style_alpha <= 1.0):
+        raise ValueError(f"Invalid gtta_style_alpha={args.gtta_style_alpha}. Must be in [0, 1]")
+    if args.gtta_include_original not in [0, 1]:
+        raise ValueError(f"Invalid gtta_include_original={args.gtta_include_original}. Must be 0 or 1")
     if args.gold_lr <= 0:
         raise ValueError(f"Invalid gold_lr={args.gold_lr}. Must be > 0")
     if args.gold_momentum < 0:
@@ -768,6 +806,19 @@ if __name__ == '__main__':
         logging.info("smppm_patch_size:"+str(opt.smppm_patch_size))
         logging.info("smppm_feature_size:"+str(opt.smppm_feature_size))
         logging.info("smppm_episodic:"+str(opt.smppm_episodic))
+    elif opt.tta == 'gtta':
+        logging.info("=== GTTA Configuration ===")
+        logging.info("GTTA is source-dependent TTA: source labels supervise adaptation; target labels are evaluation-only.")
+        logging.info("gtta_lr:"+str(opt.gtta_lr))
+        logging.info("gtta_momentum:"+str(opt.gtta_momentum))
+        logging.info("gtta_wd:"+str(opt.gtta_wd))
+        logging.info("gtta_steps:"+str(opt.gtta_steps))
+        logging.info("gtta_src_batch_size:"+str(opt.gtta_src_batch_size))
+        logging.info("gtta_lambda_ce_trg:"+str(opt.gtta_lambda_ce_trg))
+        logging.info("gtta_pseudo_momentum:"+str(opt.gtta_pseudo_momentum))
+        logging.info("gtta_style_alpha:"+str(opt.gtta_style_alpha))
+        logging.info("gtta_include_original:"+str(opt.gtta_include_original))
+        logging.info("gtta_episodic:"+str(opt.gtta_episodic))
     elif opt.tta == 'gold':
         logging.info("=== GOLD Configuration ===")
         logging.info("GOLD is source-free TTA: target labels are used only for evaluation.")
@@ -878,6 +929,13 @@ if __name__ == '__main__':
             f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
             "Target labels are not used for adaptation."
         )
+    elif opt.phase == 'test' and opt.tta == 'gtta':
+        source_train_batch_size = opt.gtta_src_batch_size
+        print(
+            "GTTA source loader: using labeled source-domain training split "
+            f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
+            "Target labels are not used for adaptation."
+        )
 
     train_loader = DataLoader(dataset = train_set, num_workers = opt.num_workers,\
             batch_size = source_train_batch_size, shuffle = True, drop_last = True, worker_init_fn = worker_init_fn, \
@@ -924,6 +982,16 @@ if __name__ == '__main__':
                 f"patch_size={opt.smppm_patch_size}, feature_size={opt.smppm_feature_size}, "
                 f"episodic={opt.smppm_episodic}"
             )
+        elif opt.tta == 'gtta':
+            print(
+                "GTTA config: source-dependent supervised TTA with medical class-aware AdaIN; "
+                "target labels are evaluation-only. "
+                f"lr={opt.gtta_lr}, momentum={opt.gtta_momentum}, wd={opt.gtta_wd}, "
+                f"steps={opt.gtta_steps}, src_batch_size={opt.gtta_src_batch_size}, "
+                f"lambda_ce_trg={opt.gtta_lambda_ce_trg}, pseudo_momentum={opt.gtta_pseudo_momentum}, "
+                f"style_alpha={opt.gtta_style_alpha}, include_original={opt.gtta_include_original}, "
+                f"episodic={opt.gtta_episodic}"
+            )
         elif opt.tta == 'gold':
             print(
                 "GOLD config: source-free TTA; target labels are evaluation-only. "
@@ -952,7 +1020,7 @@ if __name__ == '__main__':
             raise FileNotFoundError(f"Checkpoint not found: {reload_model_fid}")
 
         # Instantiate trainer
-        source_dependent_loader = train_loader if opt.tta in ['asm', 'sm_ppm'] else None
+        source_dependent_loader = train_loader if opt.tta in ['asm', 'sm_ppm', 'gtta'] else None
         model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=source_dependent_loader)
 
         with torch.no_grad():
@@ -1167,7 +1235,7 @@ if __name__ == '__main__':
         print('final test epoch %d, iters %d' %(opt.all_epoch, total_steps))
         reload_model_fid = os.path.join(snap_dir, f'{opt.all_epoch}_net_Seg.pth')
         print("reload_model_fid:",reload_model_fid)
-        source_dependent_loader = train_loader if opt.tta in ['asm', 'sm_ppm'] else None
+        source_dependent_loader = train_loader if opt.tta in ['asm', 'sm_ppm', 'gtta'] else None
         model1=Train_process(opt,reloaddir=reload_model_fid,istest=1, source_loader=source_dependent_loader)
 
         with torch.no_grad():

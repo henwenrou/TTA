@@ -16,6 +16,7 @@ from .unet import *
 from .sgf import get_sgf_map
 from .saam import StabilityAwareAlignmentModule, compute_saam_loss
 from .tta_asm import ASMAdapter
+from .tta_gtta import GTTAAdapter
 from .tta_smppm import SMPPMAdapter
 from tta_memo import build_memo_batch, marginal_entropy
 from tta_gold import GOLDAdapter
@@ -368,6 +369,9 @@ class Train_process():
         self.smppm_optimizer = None
         self.smppm_adapter = None
         self.smppm_source_loader = source_loader
+        self.gtta_optimizer = None
+        self.gtta_adapter = None
+        self.gtta_source_loader = source_loader
         self.gold_optimizer = None
         self.gold_adapter = None
         if istest == 1:
@@ -393,6 +397,11 @@ class Train_process():
                     print("SM-PPM requested: call configure_smppm(source_loader) before te_func_smppm.")
                 else:
                     self.configure_smppm(source_loader)
+            elif self.tta_mode == 'gtta':
+                if source_loader is None:
+                    print("GTTA requested: call configure_gtta(source_loader) before te_func_gtta.")
+                else:
+                    self.configure_gtta(source_loader)
             elif self.tta_mode == 'gold':
                 self.configure_gold()
 
@@ -623,6 +632,60 @@ class Train_process():
             f"patch_size={getattr(self.opt, 'smppm_patch_size', 8)}, "
             f"feature_size={getattr(self.opt, 'smppm_feature_size', 32)}, "
             f"episodic={getattr(self.opt, 'smppm_episodic', False)}"
+        )
+        print(msg)
+        logger.info(msg)
+
+    def configure_gtta(self, source_loader=None):
+        if source_loader is None:
+            source_loader = self.gtta_source_loader
+        if source_loader is None:
+            raise RuntimeError(
+                "GTTA requires a labeled source-domain training loader. "
+                "It is source-dependent TTA, not source-free TTA."
+            )
+
+        self.gtta_source_loader = source_loader
+        self.netseg.train()
+        for param in self.netseg.parameters():
+            param.requires_grad_(True)
+
+        self.gtta_optimizer = torch.optim.SGD(
+            [p for p in self.netseg.parameters() if p.requires_grad],
+            lr=getattr(self.opt, 'gtta_lr', 2.5e-4),
+            momentum=getattr(self.opt, 'gtta_momentum', 0.9),
+            weight_decay=getattr(self.opt, 'gtta_wd', 5e-4),
+            nesterov=True,
+        )
+        self.gtta_adapter = GTTAAdapter(
+            model=self.netseg,
+            optimizer=self.gtta_optimizer,
+            source_loader=source_loader,
+            device=next(self.netseg.parameters()).device,
+            num_classes=self.n_cls,
+            steps=getattr(self.opt, 'gtta_steps', 1),
+            lambda_ce_trg=getattr(self.opt, 'gtta_lambda_ce_trg', 0.1),
+            pseudo_momentum=getattr(self.opt, 'gtta_pseudo_momentum', 0.9),
+            style_alpha=getattr(self.opt, 'gtta_style_alpha', 1.0),
+            include_original=bool(getattr(self.opt, 'gtta_include_original', 1)),
+            episodic=getattr(self.opt, 'gtta_episodic', False),
+            ignore_label=getattr(self.opt, 'gtta_ignore_label', 255),
+            segmentation_criterion=self.asm_segmentation_loss,
+        )
+
+        msg = (
+            "GTTA enabled: source-dependent supervised TTA with medical class-aware AdaIN. "
+            "Target labels are used only for evaluation. "
+            f"lr={getattr(self.opt, 'gtta_lr', 2.5e-4)}, "
+            f"momentum={getattr(self.opt, 'gtta_momentum', 0.9)}, "
+            f"wd={getattr(self.opt, 'gtta_wd', 5e-4)}, "
+            f"steps={getattr(self.opt, 'gtta_steps', 1)}, "
+            f"src_batch_size={getattr(self.opt, 'gtta_src_batch_size', 2)}, "
+            f"lambda_ce_trg={getattr(self.opt, 'gtta_lambda_ce_trg', 0.1)}, "
+            f"pseudo_momentum={getattr(self.opt, 'gtta_pseudo_momentum', 0.9)}, "
+            f"style_alpha={getattr(self.opt, 'gtta_style_alpha', 1.0)}, "
+            f"include_original={getattr(self.opt, 'gtta_include_original', 1)}, "
+            f"episodic={getattr(self.opt, 'gtta_episodic', False)}"
         )
         print(msg)
         logger.info(msg)
@@ -876,6 +939,30 @@ class Train_process():
         return self.input_mask_te, seg
 
     @torch.enable_grad()
+    def te_func_gtta(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        # This label is returned for evaluation only. GTTA adaptation below uses
+        # source labels and model-generated target pseudo-labels, never target labels.
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.gtta_adapter is None:
+            raise RuntimeError("GTTA adapter is not initialized. Call configure_gtta(source_loader) first.")
+
+        logits = self.gtta_adapter.forward(self.input_img_te)
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_gtta_losses = self.gtta_adapter.last_losses
+        return self.input_mask_te, seg
+
+    @torch.enable_grad()
     def te_func_gold(self, input):
         self.input_img_te = input['image'].float().cuda()
         self.input_mask_te = input['label'].float().cuda()
@@ -911,6 +998,8 @@ class Train_process():
             return self.te_func_asm(input)
         if tta_mode == 'sm_ppm':
             return self.te_func_smppm(input)
+        if tta_mode == 'gtta':
+            return self.te_func_gtta(input)
         if tta_mode == 'gold':
             return self.te_func_gold(input)
 

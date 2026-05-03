@@ -169,3 +169,34 @@ To run the three bundled source-only checkpoints:
 ```bash
 bash scripts/tent_sourceonly_ckpts.sh
 ```
+
+## Medical GTTA Test-Time Adaptation
+
+The DCON GTTA adapter is a lightweight medical-image version of GTTA. It uses
+source labels for supervised adaptation, creates filtered target pseudo-labels
+from the current model, and applies class-aware tensor-space AdaIN to source
+images without changing source geometry. Target labels are used only by the
+evaluation code.
+
+Run the bundled source-only checkpoints:
+
+```bash
+bash scripts/run_gtta_sourceonly_ckpts.sh
+```
+
+For TTA comparisons, report only the target-domain `Overall mean dice by sample`
+metric printed by `train.py`. Source-only baseline:
+
+| 方法 | SABSCT->CHAOST2 | CHAOST2->SABSCT | bSSFP->LGE | LGE->bSSFP | 平均 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| none | 0.8147 | 0.7769 | 0.8571 | 0.8654 | 0.8285 |
+
+After running GTTA, summarize against the same baseline:
+
+```bash
+python3 scripts/summarize_overall_dice.py --methods none gtta
+```
+
+The summary script reads each experiment's `log/out.csv`, ignores the later
+source-domain evaluation block, and compares only target `Overall mean dice by
+sample`.

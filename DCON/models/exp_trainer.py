@@ -16,7 +16,9 @@ from .unet import *
 from .sgf import get_sgf_map
 from .saam import StabilityAwareAlignmentModule, compute_saam_loss
 from .tta_asm import ASMAdapter
+from .tta_smppm import SMPPMAdapter
 from tta_memo import build_memo_batch, marginal_entropy
+from tta_gold import GOLDAdapter
 import sys
 sys.path.append('..')
 from dataloaders.rccs import ProRandConvNet, RandomConvCandidateSelection, RCCSFeatureEncoder
@@ -363,6 +365,11 @@ class Train_process():
         self.asm_optimizer = None
         self.asm_adapter = None
         self.asm_source_loader = source_loader
+        self.smppm_optimizer = None
+        self.smppm_adapter = None
+        self.smppm_source_loader = source_loader
+        self.gold_optimizer = None
+        self.gold_adapter = None
         if istest == 1:
             if self.tta_mode == 'tent':
                 self.configure_tent()
@@ -381,6 +388,13 @@ class Train_process():
                     print("ASM requested: call configure_asm(source_loader) before te_func_asm.")
                 else:
                     self.configure_asm(source_loader)
+            elif self.tta_mode == 'sm_ppm':
+                if source_loader is None:
+                    print("SM-PPM requested: call configure_smppm(source_loader) before te_func_smppm.")
+                else:
+                    self.configure_smppm(source_loader)
+            elif self.tta_mode == 'gold':
+                self.configure_gold()
 
     def configure_alpha_norm(self, alpha):
         replaced = replace_bn_with_alpha_bn(self.netseg, alpha)
@@ -488,6 +502,33 @@ class Train_process():
         loss = (loss_dice * self.opt.w_dice + loss_ce * self.opt.w_ce) * self.opt.w_seg
         return loss
 
+    def smppm_segmentation_loss(self, logits, labels, pixel_weight):
+        """DCON Dice+CE source loss with SM-PPM pixel confidence weights."""
+        labels_2d = labels.squeeze(1).long() if labels.dim() == 4 else labels.long()
+        if pixel_weight.shape[2:] != labels_2d.shape[-2:]:
+            pixel_weight = F.interpolate(
+                pixel_weight,
+                size=labels_2d.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        weights = pixel_weight.squeeze(1).clamp_min(0.0)
+        denom = weights.sum().clamp_min(1e-6)
+
+        ce_map = F.cross_entropy(logits, labels_2d, reduction='none')
+        loss_ce = (ce_map * weights).sum() / denom
+
+        probs = F.softmax(logits, dim=1)
+        target_onehot = F.one_hot(labels_2d, num_classes=self.n_cls).permute(0, 3, 1, 2).to(probs)
+        weights_bc = weights.unsqueeze(1)
+        smooth = 1e-5
+        inter = (weights_bc * probs * target_onehot).sum(dim=(2, 3))
+        union = (weights_bc * (probs + target_onehot)).sum(dim=(2, 3)) + smooth
+        loss_dice = 1.0 - (2.0 * inter / union).mean()
+
+        loss = (loss_dice * self.opt.w_dice + loss_ce * self.opt.w_ce) * self.opt.w_seg
+        return loss
+
     def configure_asm(self, source_loader=None):
         if source_loader is None:
             source_loader = self.asm_source_loader
@@ -533,6 +574,107 @@ class Train_process():
             f"sampling_step={getattr(self.opt, 'asm_sampling_step', 20.0)}, "
             f"style_backend={getattr(self.opt, 'asm_style_backend', 'medical_adain')}, "
             f"episodic={getattr(self.opt, 'asm_episodic', False)}"
+        )
+        print(msg)
+        logger.info(msg)
+
+    def configure_smppm(self, source_loader=None):
+        if source_loader is None:
+            source_loader = self.smppm_source_loader
+        if source_loader is None:
+            raise RuntimeError(
+                "SM-PPM requires a labeled source-domain training loader. "
+                "It is source-dependent TTA, not source-free TTA."
+            )
+
+        self.smppm_source_loader = source_loader
+        self.netseg.train()
+        for param in self.netseg.parameters():
+            param.requires_grad_(True)
+
+        self.smppm_optimizer = torch.optim.SGD(
+            [p for p in self.netseg.parameters() if p.requires_grad],
+            lr=getattr(self.opt, 'smppm_lr', 2.5e-4),
+            momentum=getattr(self.opt, 'smppm_momentum', 0.9),
+            weight_decay=getattr(self.opt, 'smppm_wd', 5e-4),
+            nesterov=True,
+        )
+        self.smppm_adapter = SMPPMAdapter(
+            model=self.netseg,
+            optimizer=self.smppm_optimizer,
+            source_loader=source_loader,
+            device=next(self.netseg.parameters()).device,
+            num_classes=self.n_cls,
+            steps=getattr(self.opt, 'smppm_steps', 1),
+            patch_size=getattr(self.opt, 'smppm_patch_size', 8),
+            feature_size=getattr(self.opt, 'smppm_feature_size', 32),
+            episodic=getattr(self.opt, 'smppm_episodic', False),
+            segmentation_criterion=self.smppm_segmentation_loss,
+        )
+
+        msg = (
+            "SM-PPM enabled: source-dependent supervised TTA. "
+            "Target images provide feature prototypes only; target labels are used only for evaluation. "
+            f"lr={getattr(self.opt, 'smppm_lr', 2.5e-4)}, "
+            f"momentum={getattr(self.opt, 'smppm_momentum', 0.9)}, "
+            f"wd={getattr(self.opt, 'smppm_wd', 5e-4)}, "
+            f"steps={getattr(self.opt, 'smppm_steps', 1)}, "
+            f"src_batch_size={getattr(self.opt, 'smppm_src_batch_size', 2)}, "
+            f"patch_size={getattr(self.opt, 'smppm_patch_size', 8)}, "
+            f"feature_size={getattr(self.opt, 'smppm_feature_size', 32)}, "
+            f"episodic={getattr(self.opt, 'smppm_episodic', False)}"
+        )
+        print(msg)
+        logger.info(msg)
+
+    def configure_gold(self):
+        self.netseg.train()
+        for param in self.netseg.parameters():
+            param.requires_grad_(True)
+
+        self.gold_optimizer = torch.optim.SGD(
+            [p for p in self.netseg.parameters() if p.requires_grad],
+            lr=getattr(self.opt, 'gold_lr', 2.5e-4),
+            momentum=getattr(self.opt, 'gold_momentum', 0.9),
+            weight_decay=getattr(self.opt, 'gold_wd', 5e-4),
+        )
+        self.gold_adapter = GOLDAdapter(
+            model=self.netseg,
+            optimizer=self.gold_optimizer,
+            num_classes=self.n_cls,
+            steps=getattr(self.opt, 'gold_steps', 1),
+            rank=getattr(self.opt, 'gold_rank', 128),
+            tau=getattr(self.opt, 'gold_tau', 0.95),
+            alpha=getattr(self.opt, 'gold_alpha', 0.02),
+            t_eig=getattr(self.opt, 'gold_t_eig', 10),
+            mt=getattr(self.opt, 'gold_mt', 0.999),
+            s_lr=getattr(self.opt, 'gold_s_lr', 5e-3),
+            s_init_scale=getattr(self.opt, 'gold_s_init_scale', 0.0),
+            s_clip=getattr(self.opt, 'gold_s_clip', 0.5),
+            adapter_scale=getattr(self.opt, 'gold_adapter_scale', 0.05),
+            max_pixels_per_batch=getattr(self.opt, 'gold_max_pixels_per_batch', 512),
+            min_pixels_per_batch=getattr(self.opt, 'gold_min_pixels_per_batch', 64),
+            n_augmentations=getattr(self.opt, 'gold_n_augmentations', 6),
+            rst=getattr(self.opt, 'gold_rst', 0.01),
+            ap=getattr(self.opt, 'gold_ap', 0.9),
+            episodic=getattr(self.opt, 'gold_episodic', False),
+        )
+
+        msg = (
+            "GOLD enabled: source-free TTA with EMA teacher, stochastic restore, "
+            "AGOP subspace, and low-rank pre-classifier feature adapter. "
+            f"lr={getattr(self.opt, 'gold_lr', 2.5e-4)}, "
+            f"steps={getattr(self.opt, 'gold_steps', 1)}, "
+            f"rank={getattr(self.opt, 'gold_rank', 128)}, "
+            f"tau={getattr(self.opt, 'gold_tau', 0.95)}, "
+            f"alpha={getattr(self.opt, 'gold_alpha', 0.02)}, "
+            f"t_eig={getattr(self.opt, 'gold_t_eig', 10)}, "
+            f"mt={getattr(self.opt, 'gold_mt', 0.999)}, "
+            f"s_lr={getattr(self.opt, 'gold_s_lr', 5e-3)}, "
+            f"adapter_scale={getattr(self.opt, 'gold_adapter_scale', 0.05)}, "
+            f"rst={getattr(self.opt, 'gold_rst', 0.01)}, "
+            f"ap={getattr(self.opt, 'gold_ap', 0.9)}, "
+            f"episodic={getattr(self.opt, 'gold_episodic', False)}"
         )
         print(msg)
         logger.info(msg)
@@ -709,6 +851,52 @@ class Train_process():
         self.last_asm_losses = self.asm_adapter.last_losses
         return self.input_mask_te, seg
 
+    @torch.enable_grad()
+    def te_func_smppm(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        # This label is returned for evaluation only. SM-PPM adaptation below
+        # uses source labels and target image features, never target labels.
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.smppm_adapter is None:
+            raise RuntimeError("SM-PPM adapter is not initialized. Call configure_smppm(source_loader) first.")
+
+        logits = self.smppm_adapter.forward(self.input_img_te)
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_smppm_losses = self.smppm_adapter.last_losses
+        return self.input_mask_te, seg
+
+    @torch.enable_grad()
+    def te_func_gold(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.gold_adapter is None:
+            raise RuntimeError("GOLD adapter is not initialized. Call configure_gold() first.")
+
+        logits = self.gold_adapter.forward(self.input_img_te)
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_gold_losses = self.gold_adapter.last_losses
+        return self.input_mask_te, seg
+
     def te_func(self,input):
         tta_mode = getattr(self.opt, 'tta', 'none')
         if tta_mode == 'tent':
@@ -721,6 +909,10 @@ class Train_process():
             return self.te_func_memo(input)
         if tta_mode == 'asm':
             return self.te_func_asm(input)
+        if tta_mode == 'sm_ppm':
+            return self.te_func_smppm(input)
+        if tta_mode == 'gold':
+            return self.te_func_gold(input)
 
         self.input_img_te = input['image'].float().cuda()
         self.input_mask_te = input['label'].float().cuda()

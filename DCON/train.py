@@ -303,7 +303,7 @@ def get_args():
                         type=str, default=None, help='Optional explicit target domain.')
     parser.add_argument('--save_prediction', type=bool, default=True, help='save_pred')
     parser.add_argument('--tta', type=str, default='none',
-                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'cotta', 'memo', 'asm'],
+                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'cotta', 'memo', 'asm', 'sm_ppm', 'gold'],
                         help='Test-time adaptation method.')
     parser.add_argument('--bn_alpha', type=float, default=0.1,
                         help='Source/test BN-stat mixing coefficient for norm_alpha.')
@@ -350,6 +350,60 @@ def get_args():
                         help='ASM style transfer backend. medical_adain is tensor-space AdaIN statistics matching.')
     parser.add_argument('--asm_episodic', type=str2bool, nargs='?', const=True, default=False,
                         help='Reset model and optimizer before each ASM target batch.')
+    parser.add_argument('--smppm_lr', type=float, default=2.5e-4,
+                        help='Learning rate for SM-PPM supervised source-batch updates.')
+    parser.add_argument('--smppm_momentum', type=float, default=0.9,
+                        help='SGD momentum for SM-PPM updates.')
+    parser.add_argument('--smppm_wd', type=float, default=5e-4,
+                        help='Weight decay for SM-PPM updates.')
+    parser.add_argument('--smppm_steps', type=int, default=1,
+                        help='Number of labeled source batches used per target batch by SM-PPM.')
+    parser.add_argument('--smppm_src_batch_size', type=int, default=2,
+                        help='Source-domain labeled batch size for SM-PPM.')
+    parser.add_argument('--smppm_patch_size', type=int, default=8,
+                        help='Patch size on the resized target feature map for SM-PPM prototypes.')
+    parser.add_argument('--smppm_feature_size', type=int, default=32,
+                        help='Spatial size used before target feature patching for SM-PPM.')
+    parser.add_argument('--smppm_episodic', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset model and optimizer before each SM-PPM target batch.')
+    parser.add_argument('--gold_lr', type=float, default=2.5e-4,
+                        help='Learning rate for GOLD student model updates.')
+    parser.add_argument('--gold_momentum', type=float, default=0.9,
+                        help='SGD momentum for GOLD student model updates.')
+    parser.add_argument('--gold_wd', type=float, default=5e-4,
+                        help='Weight decay for GOLD student model updates.')
+    parser.add_argument('--gold_steps', type=int, default=1,
+                        help='Number of GOLD adaptation steps per test batch.')
+    parser.add_argument('--gold_rank', type=int, default=128,
+                        help='Maximum rank for GOLD low-rank feature adapter.')
+    parser.add_argument('--gold_tau', type=float, default=0.95,
+                        help='Confidence threshold for GOLD AGOP pixel sampling.')
+    parser.add_argument('--gold_alpha', type=float, default=0.02,
+                        help='EMA coefficient for GOLD AGOP matrix updates.')
+    parser.add_argument('--gold_t_eig', type=int, default=10,
+                        help='Subspace eigendecomposition refresh interval for GOLD.')
+    parser.add_argument('--gold_mt', type=float, default=0.999,
+                        help='EMA teacher momentum for GOLD.')
+    parser.add_argument('--gold_s_lr', type=float, default=5e-3,
+                        help='Learning rate for GOLD low-rank adapter scale vector.')
+    parser.add_argument('--gold_s_init_scale', type=float, default=0.0,
+                        help='Initial random scale for GOLD adapter vector S.')
+    parser.add_argument('--gold_s_clip', type=float, default=0.5,
+                        help='Clamp range for GOLD adapter vector S.')
+    parser.add_argument('--gold_adapter_scale', type=float, default=0.05,
+                        help='Feature adapter residual scale for GOLD.')
+    parser.add_argument('--gold_max_pixels_per_batch', type=int, default=512,
+                        help='Maximum confident pixels sampled per GOLD batch.')
+    parser.add_argument('--gold_min_pixels_per_batch', type=int, default=64,
+                        help='Minimum confident pixels required for GOLD AGOP update.')
+    parser.add_argument('--gold_n_augmentations', type=int, default=6,
+                        help='Number of scale/flip EMA augmentations used by GOLD when anchor confidence is low.')
+    parser.add_argument('--gold_rst', type=float, default=0.01,
+                        help='Stochastic restore probability for GOLD.')
+    parser.add_argument('--gold_ap', type=float, default=0.9,
+                        help='Anchor confidence threshold for GOLD augmentation ensembling.')
+    parser.add_argument('--gold_episodic', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset GOLD model and optimizer before each target batch.')
 
     parser.add_argument('--validation_freq', type=int, default=10, help='valfreq')
     parser.add_argument('--display_freq', type=int, default=500, help='imgfreq')
@@ -513,6 +567,58 @@ def get_args():
         raise ValueError(f"Invalid asm_sampling_step={args.asm_sampling_step}. Must be > 0")
     if args.asm_src_batch_size < 1:
         raise ValueError(f"Invalid asm_src_batch_size={args.asm_src_batch_size}. Must be >= 1")
+    if args.smppm_lr <= 0:
+        raise ValueError(f"Invalid smppm_lr={args.smppm_lr}. Must be > 0")
+    if args.smppm_momentum < 0:
+        raise ValueError(f"Invalid smppm_momentum={args.smppm_momentum}. Must be >= 0")
+    if args.smppm_wd < 0:
+        raise ValueError(f"Invalid smppm_wd={args.smppm_wd}. Must be >= 0")
+    if args.smppm_steps < 1:
+        raise ValueError(f"Invalid smppm_steps={args.smppm_steps}. Must be >= 1")
+    if args.smppm_src_batch_size < 1:
+        raise ValueError(f"Invalid smppm_src_batch_size={args.smppm_src_batch_size}. Must be >= 1")
+    if args.smppm_patch_size < 1:
+        raise ValueError(f"Invalid smppm_patch_size={args.smppm_patch_size}. Must be >= 1")
+    if args.smppm_feature_size < args.smppm_patch_size:
+        raise ValueError("smppm_feature_size must be >= smppm_patch_size")
+    if args.smppm_feature_size % args.smppm_patch_size != 0:
+        raise ValueError("smppm_feature_size must be divisible by smppm_patch_size")
+    if args.gold_lr <= 0:
+        raise ValueError(f"Invalid gold_lr={args.gold_lr}. Must be > 0")
+    if args.gold_momentum < 0:
+        raise ValueError(f"Invalid gold_momentum={args.gold_momentum}. Must be >= 0")
+    if args.gold_wd < 0:
+        raise ValueError(f"Invalid gold_wd={args.gold_wd}. Must be >= 0")
+    if args.gold_steps < 1:
+        raise ValueError(f"Invalid gold_steps={args.gold_steps}. Must be >= 1")
+    if args.gold_rank < 1:
+        raise ValueError(f"Invalid gold_rank={args.gold_rank}. Must be >= 1")
+    if not (0.0 <= args.gold_tau <= 1.0):
+        raise ValueError(f"Invalid gold_tau={args.gold_tau}. Must be in [0, 1]")
+    if not (0.0 <= args.gold_alpha <= 1.0):
+        raise ValueError(f"Invalid gold_alpha={args.gold_alpha}. Must be in [0, 1]")
+    if args.gold_t_eig < 1:
+        raise ValueError(f"Invalid gold_t_eig={args.gold_t_eig}. Must be >= 1")
+    if not (0.0 <= args.gold_mt <= 1.0):
+        raise ValueError(f"Invalid gold_mt={args.gold_mt}. Must be in [0, 1]")
+    if args.gold_s_lr <= 0:
+        raise ValueError(f"Invalid gold_s_lr={args.gold_s_lr}. Must be > 0")
+    if args.gold_s_clip < 0:
+        raise ValueError(f"Invalid gold_s_clip={args.gold_s_clip}. Must be >= 0")
+    if args.gold_adapter_scale < 0:
+        raise ValueError(f"Invalid gold_adapter_scale={args.gold_adapter_scale}. Must be >= 0")
+    if args.gold_max_pixels_per_batch < 1:
+        raise ValueError(f"Invalid gold_max_pixels_per_batch={args.gold_max_pixels_per_batch}. Must be >= 1")
+    if args.gold_min_pixels_per_batch < 1:
+        raise ValueError(f"Invalid gold_min_pixels_per_batch={args.gold_min_pixels_per_batch}. Must be >= 1")
+    if args.gold_min_pixels_per_batch > args.gold_max_pixels_per_batch:
+        raise ValueError("gold_min_pixels_per_batch must be <= gold_max_pixels_per_batch")
+    if args.gold_n_augmentations < 0:
+        raise ValueError(f"Invalid gold_n_augmentations={args.gold_n_augmentations}. Must be >= 0")
+    if not (0.0 <= args.gold_rst <= 1.0):
+        raise ValueError(f"Invalid gold_rst={args.gold_rst}. Must be in [0, 1]")
+    if not (0.0 <= args.gold_ap <= 1.0):
+        raise ValueError(f"Invalid gold_ap={args.gold_ap}. Must be in [0, 1]")
     if args.phase != 'test' and args.tta != 'none':
         raise ValueError("TTA is only supported with --phase test in this DCON entry point.")
 
@@ -651,6 +757,39 @@ if __name__ == '__main__':
         logging.info("asm_src_batch_size:"+str(opt.asm_src_batch_size))
         logging.info("asm_style_backend:"+str(opt.asm_style_backend))
         logging.info("asm_episodic:"+str(opt.asm_episodic))
+    elif opt.tta == 'sm_ppm':
+        logging.info("=== SM-PPM Configuration ===")
+        logging.info("SM-PPM is source-dependent TTA: target images provide feature prototypes only; source labels supervise adaptation.")
+        logging.info("smppm_lr:"+str(opt.smppm_lr))
+        logging.info("smppm_momentum:"+str(opt.smppm_momentum))
+        logging.info("smppm_wd:"+str(opt.smppm_wd))
+        logging.info("smppm_steps:"+str(opt.smppm_steps))
+        logging.info("smppm_src_batch_size:"+str(opt.smppm_src_batch_size))
+        logging.info("smppm_patch_size:"+str(opt.smppm_patch_size))
+        logging.info("smppm_feature_size:"+str(opt.smppm_feature_size))
+        logging.info("smppm_episodic:"+str(opt.smppm_episodic))
+    elif opt.tta == 'gold':
+        logging.info("=== GOLD Configuration ===")
+        logging.info("GOLD is source-free TTA: target labels are used only for evaluation.")
+        logging.info("gold_lr:"+str(opt.gold_lr))
+        logging.info("gold_momentum:"+str(opt.gold_momentum))
+        logging.info("gold_wd:"+str(opt.gold_wd))
+        logging.info("gold_steps:"+str(opt.gold_steps))
+        logging.info("gold_rank:"+str(opt.gold_rank))
+        logging.info("gold_tau:"+str(opt.gold_tau))
+        logging.info("gold_alpha:"+str(opt.gold_alpha))
+        logging.info("gold_t_eig:"+str(opt.gold_t_eig))
+        logging.info("gold_mt:"+str(opt.gold_mt))
+        logging.info("gold_s_lr:"+str(opt.gold_s_lr))
+        logging.info("gold_s_init_scale:"+str(opt.gold_s_init_scale))
+        logging.info("gold_s_clip:"+str(opt.gold_s_clip))
+        logging.info("gold_adapter_scale:"+str(opt.gold_adapter_scale))
+        logging.info("gold_max_pixels_per_batch:"+str(opt.gold_max_pixels_per_batch))
+        logging.info("gold_min_pixels_per_batch:"+str(opt.gold_min_pixels_per_batch))
+        logging.info("gold_n_augmentations:"+str(opt.gold_n_augmentations))
+        logging.info("gold_rst:"+str(opt.gold_rst))
+        logging.info("gold_ap:"+str(opt.gold_ap))
+        logging.info("gold_episodic:"+str(opt.gold_episodic))
     
     tb_writer = SummaryWriter( tbfile_dir  )
 
@@ -732,6 +871,13 @@ if __name__ == '__main__':
             f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
             "Target labels are not used for adaptation."
         )
+    elif opt.phase == 'test' and opt.tta == 'sm_ppm':
+        source_train_batch_size = opt.smppm_src_batch_size
+        print(
+            "SM-PPM source loader: using labeled source-domain training split "
+            f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
+            "Target labels are not used for adaptation."
+        )
 
     train_loader = DataLoader(dataset = train_set, num_workers = opt.num_workers,\
             batch_size = source_train_batch_size, shuffle = True, drop_last = True, worker_init_fn = worker_init_fn, \
@@ -769,6 +915,23 @@ if __name__ == '__main__':
                 f"src_batch_size={opt.asm_src_batch_size}, style_backend={opt.asm_style_backend}, "
                 f"episodic={opt.asm_episodic}"
             )
+        elif opt.tta == 'sm_ppm':
+            print(
+                "SM-PPM config: source-dependent supervised TTA; "
+                "target images provide feature prototypes only, target labels are evaluation-only. "
+                f"lr={opt.smppm_lr}, momentum={opt.smppm_momentum}, wd={opt.smppm_wd}, "
+                f"steps={opt.smppm_steps}, src_batch_size={opt.smppm_src_batch_size}, "
+                f"patch_size={opt.smppm_patch_size}, feature_size={opt.smppm_feature_size}, "
+                f"episodic={opt.smppm_episodic}"
+            )
+        elif opt.tta == 'gold':
+            print(
+                "GOLD config: source-free TTA; target labels are evaluation-only. "
+                f"lr={opt.gold_lr}, steps={opt.gold_steps}, rank={opt.gold_rank}, "
+                f"tau={opt.gold_tau}, alpha={opt.gold_alpha}, t_eig={opt.gold_t_eig}, "
+                f"mt={opt.gold_mt}, s_lr={opt.gold_s_lr}, adapter_scale={opt.gold_adapter_scale}, "
+                f"rst={opt.gold_rst}, ap={opt.gold_ap}, episodic={opt.gold_episodic}"
+            )
         print(f"{'='*80}\n")
 
         # Determine checkpoint path
@@ -789,8 +952,8 @@ if __name__ == '__main__':
             raise FileNotFoundError(f"Checkpoint not found: {reload_model_fid}")
 
         # Instantiate trainer
-        asm_source_loader = train_loader if opt.tta == 'asm' else None
-        model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=asm_source_loader)
+        source_dependent_loader = train_loader if opt.tta in ['asm', 'sm_ppm'] else None
+        model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=source_dependent_loader)
 
         with torch.no_grad():
             print("\n" + "="*80)
@@ -822,7 +985,7 @@ if __name__ == '__main__':
             print("="*80)
             if opt.tta != 'none':
                 print(f"Reloading checkpoint before source-domain evaluation to avoid carrying target {opt.tta} state.")
-                model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=asm_source_loader)
+                model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=source_dependent_loader)
             with open(finalfile, 'a') as f:
                 f.write("\n\nTest on source domain\n")
             type1 = 'tetrainfinal'
@@ -1004,8 +1167,8 @@ if __name__ == '__main__':
         print('final test epoch %d, iters %d' %(opt.all_epoch, total_steps))
         reload_model_fid = os.path.join(snap_dir, f'{opt.all_epoch}_net_Seg.pth')
         print("reload_model_fid:",reload_model_fid)
-        asm_source_loader = train_loader if opt.tta == 'asm' else None
-        model1=Train_process(opt,reloaddir=reload_model_fid,istest=1, source_loader=asm_source_loader)
+        source_dependent_loader = train_loader if opt.tta in ['asm', 'sm_ppm'] else None
+        model1=Train_process(opt,reloaddir=reload_model_fid,istest=1, source_loader=source_dependent_loader)
 
         with torch.no_grad():
             with open(finalfile, 'a') as f:
@@ -1032,7 +1195,7 @@ if __name__ == '__main__':
             print('\ntest for source domain')
             if opt.tta != 'none':
                 print(f"Reloading checkpoint before source-domain evaluation to avoid carrying target {opt.tta} state.")
-                model1 = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=asm_source_loader)
+                model1 = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=source_dependent_loader)
             with open(finalfile, 'a') as f:
                  f.write("\n\ntest for source domain \n")          
             type1='tetrainfinal'  

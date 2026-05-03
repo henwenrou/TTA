@@ -3,6 +3,7 @@
 import torch
 from collections import OrderedDict
 from copy import deepcopy
+import logging
 import numpy as np
 import os
 import random
@@ -14,10 +15,14 @@ from torch.autograd import Variable
 from .unet import *
 from .sgf import get_sgf_map
 from .saam import StabilityAwareAlignmentModule, compute_saam_loss
+from .tta_asm import ASMAdapter
 from tta_memo import build_memo_batch, marginal_entropy
 import sys
 sys.path.append('..')
 from dataloaders.rccs import ProRandConvNet, RandomConvCandidateSelection, RCCSFeatureEncoder
+
+
+logger = logging.getLogger(__name__)
 
 
 def softmax_entropy_seg(logits):
@@ -105,7 +110,7 @@ def update_ema_model(ema_model, model, momentum):
 
 
 class Train_process():
-    def __init__(self, opt,reloaddir=None,istest=None):
+    def __init__(self, opt,reloaddir=None,istest=None, source_loader=None):
         super(Train_process, self).__init__()
         self.opt = opt
         self.n_cls = opt.nclass
@@ -355,6 +360,9 @@ class Train_process():
         self.cotta_model_anchor = None
         self.cotta_source_state = None
         self.memo_optimizer = None
+        self.asm_optimizer = None
+        self.asm_adapter = None
+        self.asm_source_loader = source_loader
         if istest == 1:
             if self.tta_mode == 'tent':
                 self.configure_tent()
@@ -368,6 +376,11 @@ class Train_process():
                 self.configure_cotta()
             elif self.tta_mode == 'memo':
                 self.configure_memo()
+            elif self.tta_mode == 'asm':
+                if source_loader is None:
+                    print("ASM requested: call configure_asm(source_loader) before te_func_asm.")
+                else:
+                    self.configure_asm(source_loader)
 
     def configure_alpha_norm(self, alpha):
         replaced = replace_bn_with_alpha_bn(self.netseg, alpha)
@@ -466,6 +479,63 @@ class Train_process():
             f"hflip_p={getattr(self.opt, 'memo_hflip_p', 0.0)}, "
             f"scope={update_scope}"
         )
+
+    def asm_segmentation_loss(self, logits, labels):
+        """Reuse DCON's supervised Dice+CE segmentation loss for ASM source batches."""
+        labels = labels.long()
+        loss_dice = self.criterionDice(input=logits, target=labels)
+        loss_ce = self.criterionCE(inputs=logits, targets=labels)
+        loss = (loss_dice * self.opt.w_dice + loss_ce * self.opt.w_ce) * self.opt.w_seg
+        return loss
+
+    def configure_asm(self, source_loader=None):
+        if source_loader is None:
+            source_loader = self.asm_source_loader
+        if source_loader is None:
+            raise RuntimeError(
+                "ASM requires a labeled source-domain training loader. "
+                "It is source-dependent TTA, not source-free TTA."
+            )
+
+        self.asm_source_loader = source_loader
+        self.netseg.train()
+        for param in self.netseg.parameters():
+            param.requires_grad_(True)
+
+        self.asm_optimizer = torch.optim.Adam(
+            [p for p in self.netseg.parameters() if p.requires_grad],
+            lr=getattr(self.opt, 'asm_lr', 1e-4),
+            betas=(0.9, 0.999),
+            weight_decay=0.0,
+        )
+        self.asm_adapter = ASMAdapter(
+            model=self.netseg,
+            optimizer=self.asm_optimizer,
+            source_loader=source_loader,
+            device=next(self.netseg.parameters()).device,
+            num_classes=self.n_cls,
+            steps=getattr(self.opt, 'asm_steps', 1),
+            inner_steps=getattr(self.opt, 'asm_inner_steps', 2),
+            lambda_reg=getattr(self.opt, 'asm_lambda_reg', 2e-4),
+            sampling_step=getattr(self.opt, 'asm_sampling_step', 20.0),
+            episodic=getattr(self.opt, 'asm_episodic', False),
+            style_backend=getattr(self.opt, 'asm_style_backend', 'medical_adain'),
+            segmentation_criterion=self.asm_segmentation_loss,
+        )
+
+        msg = (
+            "ASM enabled: source-dependent supervised TTA. "
+            "Target images provide style/statistics only; target labels are used only for evaluation. "
+            f"lr={getattr(self.opt, 'asm_lr', 1e-4)}, "
+            f"steps={getattr(self.opt, 'asm_steps', 1)}, "
+            f"inner_steps={getattr(self.opt, 'asm_inner_steps', 2)}, "
+            f"lambda_reg={getattr(self.opt, 'asm_lambda_reg', 2e-4)}, "
+            f"sampling_step={getattr(self.opt, 'asm_sampling_step', 20.0)}, "
+            f"style_backend={getattr(self.opt, 'asm_style_backend', 'medical_adain')}, "
+            f"episodic={getattr(self.opt, 'asm_episodic', False)}"
+        )
+        print(msg)
+        logger.info(msg)
 
     @torch.no_grad()
     def cotta_ensemble_prediction(self, images, ema_logits):
@@ -615,6 +685,30 @@ class Train_process():
         self.last_memo_loss = loss.detach() if loss is not None else None
         return self.input_mask_te, seg
 
+    @torch.enable_grad()
+    def te_func_asm(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        # This label is returned for evaluation only. ASM adaptation below never
+        # uses the target label or a target pseudo-label for its loss.
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.asm_adapter is None:
+            raise RuntimeError("ASM adapter is not initialized. Call configure_asm(source_loader) first.")
+
+        logits = self.asm_adapter.forward(self.input_img_te)
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_asm_losses = self.asm_adapter.last_losses
+        return self.input_mask_te, seg
+
     def te_func(self,input):
         tta_mode = getattr(self.opt, 'tta', 'none')
         if tta_mode == 'tent':
@@ -625,6 +719,8 @@ class Train_process():
             return self.te_func_cotta(input)
         if tta_mode == 'memo':
             return self.te_func_memo(input)
+        if tta_mode == 'asm':
+            return self.te_func_asm(input)
 
         self.input_img_te = input['image'].float().cuda()
         self.input_mask_te = input['label'].float().cuda()

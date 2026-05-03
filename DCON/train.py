@@ -255,6 +255,16 @@ def time_str(fmt=None):
         fmt = '%Y-%m-%d_%H:%M:%S'
     return datetime.today().strftime(fmt)
 
+def str2bool(v):
+    if isinstance(v, bool):
+        return v
+    v = v.lower()
+    if v in ('yes', 'true', 't', '1', 'y'):
+        return True
+    if v in ('no', 'false', 'f', '0', 'n'):
+        return False
+    raise argparse.ArgumentTypeError('Boolean value expected.')
+
 def setup_default_logging(name, save_path, level=logging.INFO, 
                           format="[%(asctime)s][%(levelname)s] - %(message)s"):
     tmp_timestr = time_str()
@@ -274,7 +284,8 @@ def get_args():
     parser.add_argument('--phase', type=str, default='train', help='train or test')
     parser.add_argument('--ckpt_dir', type=str, default='./ckpts', help='checkpoint directory')
     parser.add_argument('--resume_epoch', type=int, default=None, help='epoch to resume from')
-    parser.add_argument('--resume_path', type=str, default=None, help='path to checkpoint file')
+    parser.add_argument('--resume_path', '--restore_from', dest='resume_path',
+                        type=str, default=None, help='path to checkpoint file')
 
     parser.add_argument('--gpu_ids', type=str, default='0', help='gpu')
     parser.add_argument('--f_seed', type=int, default=1, help='seed')
@@ -283,12 +294,16 @@ def get_args():
     parser.add_argument('--batchSize', type=int, default=32, help='bs')
     parser.add_argument('--all_epoch', type=int, default=50, help='epochs')
 
-    parser.add_argument('--data_name', type=str, default='CARDIAC', help='dataset')
+    parser.add_argument('--data_name', '--dataset', dest='data_name',
+                        type=str, default='CARDIAC', help='dataset')
     parser.add_argument('--nclass', type=int, default=4, help='nclass')
-    parser.add_argument('--tr_domain', type=str, default='bSSFP', help='src_domain')
+    parser.add_argument('--tr_domain', '--source', dest='tr_domain',
+                        type=str, default='bSSFP', help='src_domain')
+    parser.add_argument('--target_domain', '--target', dest='target_domain',
+                        type=str, default=None, help='Optional explicit target domain.')
     parser.add_argument('--save_prediction', type=bool, default=True, help='save_pred')
     parser.add_argument('--tta', type=str, default='none',
-                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'cotta', 'memo'],
+                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'cotta', 'memo', 'asm'],
                         help='Test-time adaptation method.')
     parser.add_argument('--bn_alpha', type=float, default=0.1,
                         help='Source/test BN-stat mixing coefficient for norm_alpha.')
@@ -318,6 +333,23 @@ def get_args():
                         help='Optional horizontal flip probability for MEMO. Default 0 for conservative medical TTA.')
     parser.add_argument('--memo_update_scope', type=str, default='all', choices=['all', 'bn_affine'],
                         help='Parameters updated by MEMO.')
+    parser.add_argument('--asm_lr', type=float, default=1e-4,
+                        help='Learning rate for ASM supervised source-batch updates.')
+    parser.add_argument('--asm_steps', type=int, default=1,
+                        help='Number of labeled source batches used per target batch.')
+    parser.add_argument('--asm_inner_steps', type=int, default=2,
+                        help='Number of ASM inner style-sampling/model updates per source batch.')
+    parser.add_argument('--asm_lambda_reg', type=float, default=2e-4,
+                        help='Weight for ASM feature mean-square regularization.')
+    parser.add_argument('--asm_sampling_step', type=float, default=20.0,
+                        help='Manual update scale for ASM style sampling state.')
+    parser.add_argument('--asm_src_batch_size', type=int, default=4,
+                        help='Source-domain labeled batch size for ASM.')
+    parser.add_argument('--asm_style_backend', type=str, default='medical_adain',
+                        choices=['medical_adain'],
+                        help='ASM style transfer backend. medical_adain is tensor-space AdaIN statistics matching.')
+    parser.add_argument('--asm_episodic', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset model and optimizer before each ASM target batch.')
 
     parser.add_argument('--validation_freq', type=int, default=10, help='valfreq')
     parser.add_argument('--display_freq', type=int, default=500, help='imgfreq')
@@ -469,6 +501,18 @@ def get_args():
         raise ValueError(f"Invalid memo_hflip_p={args.memo_hflip_p}. Must be in [0, 1]")
     if not (0.0 <= args.bn_alpha <= 1.0):
         raise ValueError(f"Invalid bn_alpha={args.bn_alpha}. Must be in [0, 1]")
+    if args.asm_lr <= 0:
+        raise ValueError(f"Invalid asm_lr={args.asm_lr}. Must be > 0")
+    if args.asm_steps < 1:
+        raise ValueError(f"Invalid asm_steps={args.asm_steps}. Must be >= 1")
+    if args.asm_inner_steps < 1:
+        raise ValueError(f"Invalid asm_inner_steps={args.asm_inner_steps}. Must be >= 1")
+    if args.asm_lambda_reg < 0:
+        raise ValueError(f"Invalid asm_lambda_reg={args.asm_lambda_reg}. Must be >= 0")
+    if args.asm_sampling_step <= 0:
+        raise ValueError(f"Invalid asm_sampling_step={args.asm_sampling_step}. Must be > 0")
+    if args.asm_src_batch_size < 1:
+        raise ValueError(f"Invalid asm_src_batch_size={args.asm_src_batch_size}. Must be >= 1")
     if args.phase != 'test' and args.tta != 'none':
         raise ValueError("TTA is only supported with --phase test in this DCON entry point.")
 
@@ -596,6 +640,17 @@ if __name__ == '__main__':
         logging.info("memo_include_identity:"+str(opt.memo_include_identity))
         logging.info("memo_hflip_p:"+str(opt.memo_hflip_p))
         logging.info("memo_update_scope:"+str(opt.memo_update_scope))
+    elif opt.tta == 'asm':
+        logging.info("=== ASM Configuration ===")
+        logging.info("ASM is source-dependent TTA: target images provide style/statistics only; source labels supervise adaptation.")
+        logging.info("asm_lr:"+str(opt.asm_lr))
+        logging.info("asm_steps:"+str(opt.asm_steps))
+        logging.info("asm_inner_steps:"+str(opt.asm_inner_steps))
+        logging.info("asm_lambda_reg:"+str(opt.asm_lambda_reg))
+        logging.info("asm_sampling_step:"+str(opt.asm_sampling_step))
+        logging.info("asm_src_batch_size:"+str(opt.asm_src_batch_size))
+        logging.info("asm_style_backend:"+str(opt.asm_style_backend))
+        logging.info("asm_episodic:"+str(opt.asm_episodic))
     
     tb_writer = SummaryWriter( tbfile_dir  )
 
@@ -622,10 +677,10 @@ if __name__ == '__main__':
     if opt.data_name == 'ABDOMINAL':
         if opt.tr_domain=='SABSCT':
             tr_domain=['SABSCT']
-            te_domain =['CHAOST2']
+            te_domain =[opt.target_domain if opt.target_domain is not None else 'CHAOST2']
         else:
             tr_domain=['CHAOST2']
-            te_domain =['SABSCT']
+            te_domain =[opt.target_domain if opt.target_domain is not None else 'SABSCT']
 
         train_set  = ABD.get_training(modality = tr_domain ,norm_func = None,opt = opt)
         tr_valset  = ABD.get_trval(modality = tr_domain, norm_func = train_set.normalize_op,opt = opt) 
@@ -648,10 +703,10 @@ if __name__ == '__main__':
     elif opt.data_name == 'CARDIAC':
         if opt.tr_domain=='LGE':
             tr_domain=['LGE']
-            te_domain=['bSSFP']
+            te_domain=[opt.target_domain if opt.target_domain is not None else 'bSSFP']
         else:
             tr_domain=['bSSFP']
-            te_domain=['LGE']
+            te_domain=[opt.target_domain if opt.target_domain is not None else 'LGE']
         train_set       = cardiac_cls.get_training(modality = tr_domain , opt = opt)
         tr_valset  = cardiac_cls.get_trval(modality = tr_domain , opt = opt)
         tr_teset  = cardiac_cls.get_trtest(modality = tr_domain , opt = opt)#as dataset split,cardiac didn't have this
@@ -669,8 +724,17 @@ if __name__ == '__main__':
         print(f"   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation")
         effective_prefetch_factor = 2
 
+    source_train_batch_size = opt.batchSize
+    if opt.phase == 'test' and opt.tta == 'asm':
+        source_train_batch_size = opt.asm_src_batch_size
+        print(
+            "ASM source loader: using labeled source-domain training split "
+            f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
+            "Target labels are not used for adaptation."
+        )
+
     train_loader = DataLoader(dataset = train_set, num_workers = opt.num_workers,\
-            batch_size = opt.batchSize, shuffle = True, drop_last = True, worker_init_fn = worker_init_fn, \
+            batch_size = source_train_batch_size, shuffle = True, drop_last = True, worker_init_fn = worker_init_fn, \
             pin_memory = True, prefetch_factor = effective_prefetch_factor, persistent_workers=(opt.num_workers > 0))  # Keep workers alive across epochs.
     trval_loader=DataLoader(dataset = tr_valset, num_workers = opt.num_workers,batch_size = 1, shuffle = False, pin_memory = True, prefetch_factor = effective_prefetch_factor)
     trte_loader=DataLoader(dataset = tr_teset, num_workers = opt.num_workers,batch_size = 1, shuffle = False, pin_memory = True, prefetch_factor = effective_prefetch_factor)
@@ -696,6 +760,15 @@ if __name__ == '__main__':
                 f"hflip_p={opt.memo_hflip_p}, "
                 f"scope={opt.memo_update_scope}"
             )
+        elif opt.tta == 'asm':
+            print(
+                "ASM config: source-dependent supervised TTA; "
+                "target images provide style/statistics only, target labels are evaluation-only. "
+                f"lr={opt.asm_lr}, steps={opt.asm_steps}, inner_steps={opt.asm_inner_steps}, "
+                f"lambda_reg={opt.asm_lambda_reg}, sampling_step={opt.asm_sampling_step}, "
+                f"src_batch_size={opt.asm_src_batch_size}, style_backend={opt.asm_style_backend}, "
+                f"episodic={opt.asm_episodic}"
+            )
         print(f"{'='*80}\n")
 
         # Determine checkpoint path
@@ -716,7 +789,8 @@ if __name__ == '__main__':
             raise FileNotFoundError(f"Checkpoint not found: {reload_model_fid}")
 
         # Instantiate trainer
-        model = Train_process(opt, reloaddir=reload_model_fid, istest=1)
+        asm_source_loader = train_loader if opt.tta == 'asm' else None
+        model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=asm_source_loader)
 
         with torch.no_grad():
             print("\n" + "="*80)
@@ -748,7 +822,7 @@ if __name__ == '__main__':
             print("="*80)
             if opt.tta != 'none':
                 print(f"Reloading checkpoint before source-domain evaluation to avoid carrying target {opt.tta} state.")
-                model = Train_process(opt, reloaddir=reload_model_fid, istest=1)
+                model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=asm_source_loader)
             with open(finalfile, 'a') as f:
                 f.write("\n\nTest on source domain\n")
             type1 = 'tetrainfinal'
@@ -930,7 +1004,8 @@ if __name__ == '__main__':
         print('final test epoch %d, iters %d' %(opt.all_epoch, total_steps))
         reload_model_fid = os.path.join(snap_dir, f'{opt.all_epoch}_net_Seg.pth')
         print("reload_model_fid:",reload_model_fid)
-        model1=Train_process(opt,reloaddir=reload_model_fid,istest=1)
+        asm_source_loader = train_loader if opt.tta == 'asm' else None
+        model1=Train_process(opt,reloaddir=reload_model_fid,istest=1, source_loader=asm_source_loader)
 
         with torch.no_grad():
             with open(finalfile, 'a') as f:
@@ -957,7 +1032,7 @@ if __name__ == '__main__':
             print('\ntest for source domain')
             if opt.tta != 'none':
                 print(f"Reloading checkpoint before source-domain evaluation to avoid carrying target {opt.tta} state.")
-                model1 = Train_process(opt, reloaddir=reload_model_fid, istest=1)
+                model1 = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=asm_source_loader)
             with open(finalfile, 'a') as f:
                  f.write("\n\ntest for source domain \n")          
             type1='tetrainfinal'  

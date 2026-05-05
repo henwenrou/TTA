@@ -312,7 +312,7 @@ def get_args():
     parser.add_argument('--eval_source_domain', type=str2bool, nargs='?', const=True, default=True,
                         help='Also evaluate the source-domain trtest split after target evaluation.')
     parser.add_argument('--tta', type=str, default='none',
-                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'dg_tta', 'cotta', 'memo', 'asm', 'sm_ppm', 'gtta', 'gold', 'vptta', 'pass', 'sictta'],
+                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'dg_tta', 'cotta', 'memo', 'asm', 'sm_ppm', 'gtta', 'gold', 'vptta', 'pass', 'sictta', 'a3_tta'],
                         help='Test-time adaptation method.')
     parser.add_argument('--bn_alpha', type=float, default=0.1,
                         help='Source/test BN-stat mixing coefficient for norm_alpha.')
@@ -521,6 +521,26 @@ def get_args():
                         help='Number of random pixels sampled for SicTTA CCD entropy.')
     parser.add_argument('--sictta_episodic', type=str2bool, nargs='?', const=True, default=False,
                         help='Reset SicTTA memory before every target slice. Default false for continual adaptation.')
+    parser.add_argument('--a3_lr', type=float, default=1e-4,
+                        help='Learning rate for A3-TTA online model updates.')
+    parser.add_argument('--a3_steps', type=int, default=1,
+                        help='Number of A3-TTA adaptation steps per test batch.')
+    parser.add_argument('--a3_pool_size', type=int, default=40,
+                        help='Maximum number of bottleneck prototypes kept by A3-TTA.')
+    parser.add_argument('--a3_top_k', type=int, default=1,
+                        help='Number of nearest A3-TTA prototypes used for feature alignment.')
+    parser.add_argument('--a3_mt', type=float, default=0.99,
+                        help='Maximum EMA teacher momentum for A3-TTA. Use a negative value for no cap.')
+    parser.add_argument('--a3_feature_loss_weight', type=float, default=1.0,
+                        help='Weight for A3-TTA aligned-feature prediction loss.')
+    parser.add_argument('--a3_entropy_match_weight', type=float, default=5.0,
+                        help='Weight for A3-TTA pixel-entropy matching loss.')
+    parser.add_argument('--a3_ema_loss_weight', type=float, default=1.0,
+                        help='Weight for A3-TTA EMA teacher consistency loss.')
+    parser.add_argument('--a3_episodic', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset A3-TTA model and prototype pool before each target slice.')
+    parser.add_argument('--a3_reset_on_scan_start', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset A3-TTA model and prototype pool when a new target scan starts.')
 
     parser.add_argument('--validation_freq', type=int, default=10, help='valfreq')
     parser.add_argument('--display_freq', type=int, default=500, help='imgfreq')

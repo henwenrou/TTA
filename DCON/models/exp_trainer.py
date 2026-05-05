@@ -34,6 +34,8 @@ from tta_pass import (
     configure_pass_model,
 )
 from tta_sictta import SicTTAAdapter, configure_model_for_sictta
+from tta_a3_tta import A3TTAAdapter, configure_model_for_a3_tta
+from tta_spmo import SPMOAdapter
 import sys
 sys.path.append('..')
 from dataloaders.rccs import ProRandConvNet, RandomConvCandidateSelection, RCCSFeatureEncoder
@@ -398,7 +400,12 @@ class Train_process():
         self.pass_adapter = None
         self.pass_bn_monitor = None
         self.pass_source_model = None
+        self.spmo_optimizer = None
+        self.spmo_adapter = None
+        self.spmo_source_model = None
         self.sictta_adapter = None
+        self.a3_optimizer = None
+        self.a3_adapter = None
         if istest == 1:
             if self.tta_mode == 'tent':
                 self.configure_tent()
@@ -435,8 +442,12 @@ class Train_process():
                 self.configure_vptta()
             elif self.tta_mode == 'pass':
                 self.configure_pass()
+            elif self.tta_mode == 'spmo':
+                self.configure_spmo()
             elif self.tta_mode == 'sictta':
                 self.configure_sictta()
+            elif self.tta_mode == 'a3_tta':
+                self.configure_a3_tta()
 
     def configure_alpha_norm(self, alpha):
         replaced = replace_bn_with_alpha_bn(self.netseg, alpha)
@@ -991,6 +1002,51 @@ class Train_process():
         print(msg)
         logger.info(msg)
 
+    def configure_a3_tta(self):
+        configure_model_for_a3_tta(self.netseg)
+        params = [param for param in self.netseg.parameters() if param.requires_grad]
+        if len(params) == 0:
+            raise RuntimeError("A3-TTA found no trainable segmentation parameters.")
+
+        self.a3_optimizer = torch.optim.Adam(
+            params,
+            lr=getattr(self.opt, 'a3_lr', 1e-4),
+            betas=(0.5, 0.999),
+            weight_decay=0.0,
+        )
+        self.a3_adapter = A3TTAAdapter(
+            model=self.netseg,
+            optimizer=self.a3_optimizer,
+            num_classes=self.n_cls,
+            steps=getattr(self.opt, 'a3_steps', 1),
+            mt_alpha=getattr(self.opt, 'a3_mt', 0.99),
+            pool_size=getattr(self.opt, 'a3_pool_size', 40),
+            top_k=getattr(self.opt, 'a3_top_k', 1),
+            feature_loss_weight=getattr(self.opt, 'a3_feature_loss_weight', 1.0),
+            entropy_match_weight=getattr(self.opt, 'a3_entropy_match_weight', 5.0),
+            ema_loss_weight=getattr(self.opt, 'a3_ema_loss_weight', 1.0),
+            episodic=getattr(self.opt, 'a3_episodic', False),
+            reset_on_scan_start=getattr(self.opt, 'a3_reset_on_scan_start', False),
+        )
+
+        msg = (
+            "A3-TTA enabled: source-free online anchor alignment adapted to DCON U-Net. "
+            "Target labels are used only for evaluation. "
+            f"lr={getattr(self.opt, 'a3_lr', 1e-4)}, "
+            f"steps={getattr(self.opt, 'a3_steps', 1)}, "
+            f"pool_size={getattr(self.opt, 'a3_pool_size', 40)}, "
+            f"top_k={getattr(self.opt, 'a3_top_k', 1)}, "
+            f"mt={getattr(self.opt, 'a3_mt', 0.99)}, "
+            f"feature_w={getattr(self.opt, 'a3_feature_loss_weight', 1.0)}, "
+            f"entropy_w={getattr(self.opt, 'a3_entropy_match_weight', 5.0)}, "
+            f"ema_w={getattr(self.opt, 'a3_ema_loss_weight', 1.0)}, "
+            f"episodic={getattr(self.opt, 'a3_episodic', False)}, "
+            f"reset_on_scan_start={getattr(self.opt, 'a3_reset_on_scan_start', False)}, "
+            f"trainable_tensors={len(params)}"
+        )
+        print(msg)
+        logger.info(msg)
+
     @torch.no_grad()
     def cotta_ensemble_prediction(self, images, ema_logits):
         inp_shape = images.shape[2:]
@@ -1316,6 +1372,32 @@ class Train_process():
         self.last_sictta_stats = self.sictta_adapter.last_stats
         return self.input_mask_te, seg
 
+    @torch.enable_grad()
+    def te_func_a3_tta(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.a3_adapter is None:
+            raise RuntimeError("A3-TTA adapter is not initialized. Call configure_a3_tta() first.")
+
+        logits = self.a3_adapter.forward(
+            self.input_img_te,
+            names=input.get('names', None),
+            is_start=bool(input.get('is_start', False)),
+        )
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_a3_losses = self.a3_adapter.last_losses
+        return self.input_mask_te, seg
+
     def te_func(self,input):
         tta_mode = getattr(self.opt, 'tta', 'none')
         if tta_mode == 'tent':
@@ -1342,6 +1424,8 @@ class Train_process():
             return self.te_func_pass(input)
         if tta_mode == 'sictta':
             return self.te_func_sictta(input)
+        if tta_mode == 'a3_tta':
+            return self.te_func_a3_tta(input)
 
         self.input_img_te = input['image'].float().cuda()
         self.input_mask_te = input['label'].float().cuda()

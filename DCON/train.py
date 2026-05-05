@@ -852,6 +852,22 @@ def get_args():
         raise ValueError(f"Invalid sictta_threshold={args.sictta_threshold}. Must be in [0, 1]")
     if args.sictta_select_points < 1:
         raise ValueError(f"Invalid sictta_select_points={args.sictta_select_points}. Must be >= 1")
+    if args.a3_lr <= 0:
+        raise ValueError(f"Invalid a3_lr={args.a3_lr}. Must be > 0")
+    if args.a3_steps < 1:
+        raise ValueError(f"Invalid a3_steps={args.a3_steps}. Must be >= 1")
+    if args.a3_pool_size < 1:
+        raise ValueError(f"Invalid a3_pool_size={args.a3_pool_size}. Must be >= 1")
+    if args.a3_top_k < 1:
+        raise ValueError(f"Invalid a3_top_k={args.a3_top_k}. Must be >= 1")
+    if args.a3_mt >= 0 and not (0.0 <= args.a3_mt <= 1.0):
+        raise ValueError(f"Invalid a3_mt={args.a3_mt}. Must be in [0, 1], or negative for no cap")
+    if args.a3_feature_loss_weight < 0:
+        raise ValueError("a3_feature_loss_weight must be >= 0")
+    if args.a3_entropy_match_weight < 0:
+        raise ValueError("a3_entropy_match_weight must be >= 0")
+    if args.a3_ema_loss_weight < 0:
+        raise ValueError("a3_ema_loss_weight must be >= 0")
     if args.phase != 'test' and args.tta != 'none':
         raise ValueError("TTA is only supported with --phase test in this DCON entry point.")
 
@@ -1090,6 +1106,19 @@ if __name__ == '__main__':
         logging.info("sictta_threshold:"+str(opt.sictta_threshold))
         logging.info("sictta_select_points:"+str(opt.sictta_select_points))
         logging.info("sictta_episodic:"+str(opt.sictta_episodic))
+    elif opt.tta == 'a3_tta':
+        logging.info("=== A3-TTA Configuration ===")
+        logging.info("A3-TTA is source-free online TTA: target labels are evaluation-only.")
+        logging.info("a3_lr:"+str(opt.a3_lr))
+        logging.info("a3_steps:"+str(opt.a3_steps))
+        logging.info("a3_pool_size:"+str(opt.a3_pool_size))
+        logging.info("a3_top_k:"+str(opt.a3_top_k))
+        logging.info("a3_mt:"+str(opt.a3_mt))
+        logging.info("a3_feature_loss_weight:"+str(opt.a3_feature_loss_weight))
+        logging.info("a3_entropy_match_weight:"+str(opt.a3_entropy_match_weight))
+        logging.info("a3_ema_loss_weight:"+str(opt.a3_ema_loss_weight))
+        logging.info("a3_episodic:"+str(opt.a3_episodic))
+        logging.info("a3_reset_on_scan_start:"+str(opt.a3_reset_on_scan_start))
     
     tb_writer = SummaryWriter( tbfile_dir  )
 
@@ -1282,6 +1311,17 @@ if __name__ == '__main__':
                 f"max_lens={opt.sictta_max_lens}, topk={opt.sictta_topk}, "
                 f"threshold={opt.sictta_threshold}, select_points={opt.sictta_select_points}, "
                 f"episodic={opt.sictta_episodic}"
+            )
+        elif opt.tta == 'a3_tta':
+            print(
+                "A3-TTA config: source-free online anchor alignment TTA; "
+                "target labels are evaluation-only. "
+                f"lr={opt.a3_lr}, steps={opt.a3_steps}, pool_size={opt.a3_pool_size}, "
+                f"top_k={opt.a3_top_k}, mt={opt.a3_mt}, "
+                f"feature_w={opt.a3_feature_loss_weight}, "
+                f"entropy_w={opt.a3_entropy_match_weight}, "
+                f"ema_w={opt.a3_ema_loss_weight}, "
+                f"episodic={opt.a3_episodic}, reset_on_scan_start={opt.a3_reset_on_scan_start}"
             )
         print(f"{'='*80}\n")
 

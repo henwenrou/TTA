@@ -70,7 +70,14 @@ def prediction_wrapper(tb_writer,type1,savdir,model, test_loader,  epoch, label_
                 curr_img = torch.Tensor(np.zeros( [ nframe,nx, ny]  )).cuda()
 
             assert batch['label'].shape[0] == 1 # enforce a batchsize of 1
-            test_input = {'image': batch['base_view'],'label': batch['label']}
+            test_input = {
+                'image': batch['base_view'],
+                'label': batch['label'],
+                'names': [f'{scan_id_full}_{slice_idx:04d}'],
+                'is_start': batch.get('is_start', False),
+                'is_end': batch.get('is_end', False),
+                'scan_id': batch.get('scan_id', None),
+            }
             gth, pred = model.te_func(test_input)
 
             curr_pred[slice_idx, ...]   = pred[0, ...] # nb (1), nc, nx, ny
@@ -301,9 +308,11 @@ def get_args():
                         type=str, default='bSSFP', help='src_domain')
     parser.add_argument('--target_domain', '--target', dest='target_domain',
                         type=str, default=None, help='Optional explicit target domain.')
-    parser.add_argument('--save_prediction', type=bool, default=True, help='save_pred')
+    parser.add_argument('--save_prediction', type=str2bool, nargs='?', const=True, default=True, help='save_pred')
+    parser.add_argument('--eval_source_domain', type=str2bool, nargs='?', const=True, default=True,
+                        help='Also evaluate the source-domain trtest split after target evaluation.')
     parser.add_argument('--tta', type=str, default='none',
-                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'cotta', 'memo', 'asm', 'sm_ppm', 'gtta', 'gold'],
+                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'dg_tta', 'cotta', 'memo', 'asm', 'sm_ppm', 'gtta', 'gold', 'vptta', 'pass', 'sictta'],
                         help='Test-time adaptation method.')
     parser.add_argument('--bn_alpha', type=float, default=0.1,
                         help='Source/test BN-stat mixing coefficient for norm_alpha.')
@@ -311,6 +320,18 @@ def get_args():
                         help='Learning rate for TENT BN affine updates.')
     parser.add_argument('--tent_steps', type=int, default=1,
                         help='Number of TENT adaptation steps per test batch.')
+    parser.add_argument('--dgtta_lr', type=float, default=1e-4,
+                        help='Learning rate for DG-TTA BN affine updates.')
+    parser.add_argument('--dgtta_steps', type=int, default=1,
+                        help='Number of DG-TTA adaptation steps per test batch.')
+    parser.add_argument('--dgtta_transform_strength', type=float, default=1.0,
+                        help='Spatial/intensity augmentation strength for DG-TTA consistency.')
+    parser.add_argument('--dgtta_entropy_weight', type=float, default=0.05,
+                        help='Weight for DG-TTA target entropy term.')
+    parser.add_argument('--dgtta_bn_l2_reg', type=float, default=1e-4,
+                        help='Weight for DG-TTA BN affine L2 regularization to source values.')
+    parser.add_argument('--dgtta_episodic', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset DG-TTA model and optimizer before each target batch.')
     parser.add_argument('--cotta_lr', type=float, default=1e-4,
                         help='Learning rate for CoTTA online updates.')
     parser.add_argument('--cotta_steps', type=int, default=1,
@@ -424,6 +445,82 @@ def get_args():
                         help='Anchor confidence threshold for GOLD augmentation ensembling.')
     parser.add_argument('--gold_episodic', type=str2bool, nargs='?', const=True, default=False,
                         help='Reset GOLD model and optimizer before each target batch.')
+    parser.add_argument('--vptta_optimizer', type=str, default='Adam', choices=['SGD', 'Adam'],
+                        help='Optimizer for the VPTTA frequency prompt.')
+    parser.add_argument('--vptta_lr', type=float, default=1e-2,
+                        help='Learning rate for VPTTA prompt updates.')
+    parser.add_argument('--vptta_momentum', type=float, default=0.99,
+                        help='SGD momentum for VPTTA prompt updates.')
+    parser.add_argument('--vptta_beta1', type=float, default=0.9,
+                        help='Adam beta1 for VPTTA prompt updates.')
+    parser.add_argument('--vptta_beta2', type=float, default=0.99,
+                        help='Adam beta2 for VPTTA prompt updates.')
+    parser.add_argument('--vptta_weight_decay', type=float, default=0.0,
+                        help='Weight decay for VPTTA prompt updates.')
+    parser.add_argument('--vptta_steps', type=int, default=1,
+                        help='Number of VPTTA prompt adaptation steps per test batch.')
+    parser.add_argument('--vptta_memory_size', type=int, default=40,
+                        help='Number of previous prompts kept in the VPTTA memory bank.')
+    parser.add_argument('--vptta_neighbor', type=int, default=16,
+                        help='Number of nearest memory prompts used to initialize VPTTA.')
+    parser.add_argument('--vptta_prompt_alpha', type=float, default=0.01,
+                        help='Low-frequency prompt size ratio when --vptta_prompt_size is not set.')
+    parser.add_argument('--vptta_prompt_size', type=int, default=None,
+                        help='Explicit square low-frequency prompt size. Overrides --vptta_prompt_alpha.')
+    parser.add_argument('--vptta_image_size', type=int, default=192,
+                        help='Reference image size used to derive the default VPTTA prompt size.')
+    parser.add_argument('--vptta_warm_n', type=int, default=5,
+                        help='Warm-up constant for VPTTA source/target BN-stat interpolation.')
+    parser.add_argument('--pass_optimizer', type=str, default='Adam', choices=['SGD', 'Adam'],
+                        help='Optimizer for PASS prompt/adaptor updates.')
+    parser.add_argument('--pass_lr', type=float, default=5e-3,
+                        help='Learning rate for PASS prompt/adaptor updates.')
+    parser.add_argument('--pass_momentum', type=float, default=0.99,
+                        help='SGD momentum for PASS.')
+    parser.add_argument('--pass_beta1', type=float, default=0.9,
+                        help='Adam beta1 for PASS.')
+    parser.add_argument('--pass_beta2', type=float, default=0.999,
+                        help='Adam beta2 for PASS.')
+    parser.add_argument('--pass_weight_decay', type=float, default=0.0,
+                        help='Weight decay for PASS optimizer.')
+    parser.add_argument('--pass_steps', type=int, default=1,
+                        help='Number of PASS adaptation steps per test batch.')
+    parser.add_argument('--pass_bn_alpha', type=float, default=0.01,
+                        help='Variance weight for PASS source-BN statistic matching loss.')
+    parser.add_argument('--pass_bn_layers', type=int, default=0,
+                        help='Number of BatchNorm layers used by PASS BN loss; 0 means all.')
+    parser.add_argument('--pass_entropy_weight', type=float, default=0.0,
+                        help='Optional softmax entropy weight added to PASS BN loss.')
+    parser.add_argument('--pass_ema_decay', type=float, default=0.94,
+                        help='EMA decay for PASS target prompt network.')
+    parser.add_argument('--pass_min_momentum_constant', type=float, default=0.01,
+                        help='Minimum EMA momentum constant for PASS.')
+    parser.add_argument('--pass_episodic', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset PASS prompt/adaptor to source initialization for each test batch.')
+    parser.add_argument('--pass_use_source_fallback', type=str2bool, nargs='?', const=True, default=True,
+                        help='Use the source prediction when PASS adaptation increases prediction entropy.')
+    parser.add_argument('--pass_image_size', type=int, default=192,
+                        help='Reference image size used to derive the default PASS bottleneck prompt size.')
+    parser.add_argument('--pass_prompt_size', type=int, default=None,
+                        help='Explicit square bottleneck prompt size. Overrides --pass_image_size.')
+    parser.add_argument('--pass_adaptor_hidden', type=int, default=64,
+                        help='Hidden channels in the PASS image-space data adaptor.')
+    parser.add_argument('--pass_perturb_scale', type=float, default=1.0,
+                        help='Scale applied to PASS image-space adaptor residual.')
+    parser.add_argument('--pass_prompt_scale', type=float, default=1.0,
+                        help='Scale applied to PASS bottleneck prompt residual.')
+    parser.add_argument('--pass_prompt_sparsity', type=float, default=0.1,
+                        help='Sparse channel-attention keep ratio in PASS prompt matching.')
+    parser.add_argument('--sictta_max_lens', type=int, default=40,
+                        help='Maximum number of reliable target bottleneck prototypes kept by SicTTA.')
+    parser.add_argument('--sictta_topk', type=int, default=5,
+                        help='Number of nearest prototype features mixed by SicTTA.')
+    parser.add_argument('--sictta_threshold', type=float, default=0.9,
+                        help='CCD reliability threshold used by SicTTA after the prototype pool is warm.')
+    parser.add_argument('--sictta_select_points', type=int, default=200,
+                        help='Number of random pixels sampled for SicTTA CCD entropy.')
+    parser.add_argument('--sictta_episodic', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset SicTTA memory before every target slice. Default false for continual adaptation.')
 
     parser.add_argument('--validation_freq', type=int, default=10, help='valfreq')
     parser.add_argument('--display_freq', type=int, default=500, help='imgfreq')
@@ -559,6 +656,16 @@ def get_args():
         raise ValueError(f"Invalid tent_steps={args.tent_steps}. Must be >= 1")
     if args.tent_lr <= 0:
         raise ValueError(f"Invalid tent_lr={args.tent_lr}. Must be > 0")
+    if args.dgtta_steps < 1:
+        raise ValueError(f"Invalid dgtta_steps={args.dgtta_steps}. Must be >= 1")
+    if args.dgtta_lr <= 0:
+        raise ValueError(f"Invalid dgtta_lr={args.dgtta_lr}. Must be > 0")
+    if args.dgtta_transform_strength < 0:
+        raise ValueError(f"Invalid dgtta_transform_strength={args.dgtta_transform_strength}. Must be >= 0")
+    if args.dgtta_entropy_weight < 0:
+        raise ValueError(f"Invalid dgtta_entropy_weight={args.dgtta_entropy_weight}. Must be >= 0")
+    if args.dgtta_bn_l2_reg < 0:
+        raise ValueError(f"Invalid dgtta_bn_l2_reg={args.dgtta_bn_l2_reg}. Must be >= 0")
     if args.cotta_steps < 1:
         raise ValueError(f"Invalid cotta_steps={args.cotta_steps}. Must be >= 1")
     if args.cotta_lr <= 0:
@@ -657,6 +764,74 @@ def get_args():
         raise ValueError(f"Invalid gold_rst={args.gold_rst}. Must be in [0, 1]")
     if not (0.0 <= args.gold_ap <= 1.0):
         raise ValueError(f"Invalid gold_ap={args.gold_ap}. Must be in [0, 1]")
+    if args.vptta_lr <= 0:
+        raise ValueError(f"Invalid vptta_lr={args.vptta_lr}. Must be > 0")
+    if args.vptta_momentum < 0:
+        raise ValueError(f"Invalid vptta_momentum={args.vptta_momentum}. Must be >= 0")
+    if not (0.0 <= args.vptta_beta1 < 1.0):
+        raise ValueError(f"Invalid vptta_beta1={args.vptta_beta1}. Must be in [0, 1)")
+    if not (0.0 <= args.vptta_beta2 < 1.0):
+        raise ValueError(f"Invalid vptta_beta2={args.vptta_beta2}. Must be in [0, 1)")
+    if args.vptta_weight_decay < 0:
+        raise ValueError(f"Invalid vptta_weight_decay={args.vptta_weight_decay}. Must be >= 0")
+    if args.vptta_steps < 1:
+        raise ValueError(f"Invalid vptta_steps={args.vptta_steps}. Must be >= 1")
+    if args.vptta_memory_size < 1:
+        raise ValueError(f"Invalid vptta_memory_size={args.vptta_memory_size}. Must be >= 1")
+    if args.vptta_neighbor < 1:
+        raise ValueError(f"Invalid vptta_neighbor={args.vptta_neighbor}. Must be >= 1")
+    if args.vptta_neighbor > args.vptta_memory_size:
+        raise ValueError("vptta_neighbor must be <= vptta_memory_size")
+    if not (0.0 < args.vptta_prompt_alpha <= 1.0):
+        raise ValueError(f"Invalid vptta_prompt_alpha={args.vptta_prompt_alpha}. Must be in (0, 1]")
+    if args.vptta_prompt_size is not None and args.vptta_prompt_size < 1:
+        raise ValueError(f"Invalid vptta_prompt_size={args.vptta_prompt_size}. Must be >= 1")
+    if args.vptta_image_size < 1:
+        raise ValueError(f"Invalid vptta_image_size={args.vptta_image_size}. Must be >= 1")
+    if args.vptta_warm_n < 1:
+        raise ValueError(f"Invalid vptta_warm_n={args.vptta_warm_n}. Must be >= 1")
+    if args.pass_lr <= 0:
+        raise ValueError(f"Invalid pass_lr={args.pass_lr}. Must be > 0")
+    if args.pass_momentum < 0:
+        raise ValueError(f"Invalid pass_momentum={args.pass_momentum}. Must be >= 0")
+    if not (0.0 <= args.pass_beta1 < 1.0):
+        raise ValueError(f"Invalid pass_beta1={args.pass_beta1}. Must be in [0, 1)")
+    if not (0.0 <= args.pass_beta2 < 1.0):
+        raise ValueError(f"Invalid pass_beta2={args.pass_beta2}. Must be in [0, 1)")
+    if args.pass_weight_decay < 0:
+        raise ValueError(f"Invalid pass_weight_decay={args.pass_weight_decay}. Must be >= 0")
+    if args.pass_steps < 1:
+        raise ValueError(f"Invalid pass_steps={args.pass_steps}. Must be >= 1")
+    if args.pass_bn_alpha < 0:
+        raise ValueError(f"Invalid pass_bn_alpha={args.pass_bn_alpha}. Must be >= 0")
+    if args.pass_bn_layers < 0:
+        raise ValueError(f"Invalid pass_bn_layers={args.pass_bn_layers}. Must be >= 0")
+    if args.pass_entropy_weight < 0:
+        raise ValueError(f"Invalid pass_entropy_weight={args.pass_entropy_weight}. Must be >= 0")
+    if not (0.0 <= args.pass_ema_decay <= 1.0):
+        raise ValueError(f"Invalid pass_ema_decay={args.pass_ema_decay}. Must be in [0, 1]")
+    if args.pass_min_momentum_constant < 0:
+        raise ValueError("pass_min_momentum_constant must be >= 0")
+    if args.pass_image_size < 1:
+        raise ValueError(f"Invalid pass_image_size={args.pass_image_size}. Must be >= 1")
+    if args.pass_prompt_size is not None and args.pass_prompt_size < 1:
+        raise ValueError(f"Invalid pass_prompt_size={args.pass_prompt_size}. Must be >= 1")
+    if args.pass_adaptor_hidden < 1:
+        raise ValueError(f"Invalid pass_adaptor_hidden={args.pass_adaptor_hidden}. Must be >= 1")
+    if args.pass_perturb_scale < 0:
+        raise ValueError(f"Invalid pass_perturb_scale={args.pass_perturb_scale}. Must be >= 0")
+    if args.pass_prompt_scale < 0:
+        raise ValueError(f"Invalid pass_prompt_scale={args.pass_prompt_scale}. Must be >= 0")
+    if not (0.0 < args.pass_prompt_sparsity <= 1.0):
+        raise ValueError(f"Invalid pass_prompt_sparsity={args.pass_prompt_sparsity}. Must be in (0, 1]")
+    if args.sictta_max_lens < 1:
+        raise ValueError(f"Invalid sictta_max_lens={args.sictta_max_lens}. Must be >= 1")
+    if args.sictta_topk < 1:
+        raise ValueError(f"Invalid sictta_topk={args.sictta_topk}. Must be >= 1")
+    if not (0.0 <= args.sictta_threshold <= 1.0):
+        raise ValueError(f"Invalid sictta_threshold={args.sictta_threshold}. Must be in [0, 1]")
+    if args.sictta_select_points < 1:
+        raise ValueError(f"Invalid sictta_select_points={args.sictta_select_points}. Must be >= 1")
     if args.phase != 'test' and args.tta != 'none':
         raise ValueError("TTA is only supported with --phase test in this DCON entry point.")
 
@@ -769,6 +944,13 @@ if __name__ == '__main__':
     if opt.tta == 'tent':
         logging.info("tent_lr:"+str(opt.tent_lr))
         logging.info("tent_steps:"+str(opt.tent_steps))
+    elif opt.tta == 'dg_tta':
+        logging.info("dgtta_lr:"+str(opt.dgtta_lr))
+        logging.info("dgtta_steps:"+str(opt.dgtta_steps))
+        logging.info("dgtta_transform_strength:"+str(opt.dgtta_transform_strength))
+        logging.info("dgtta_entropy_weight:"+str(opt.dgtta_entropy_weight))
+        logging.info("dgtta_bn_l2_reg:"+str(opt.dgtta_bn_l2_reg))
+        logging.info("dgtta_episodic:"+str(opt.dgtta_episodic))
     elif opt.tta == 'norm_alpha':
         logging.info("bn_alpha:"+str(opt.bn_alpha))
     elif opt.tta == 'cotta':
@@ -841,6 +1023,53 @@ if __name__ == '__main__':
         logging.info("gold_rst:"+str(opt.gold_rst))
         logging.info("gold_ap:"+str(opt.gold_ap))
         logging.info("gold_episodic:"+str(opt.gold_episodic))
+    elif opt.tta == 'vptta':
+        logging.info("=== VPTTA Configuration ===")
+        logging.info("VPTTA is source-free TTA: only the frequency prompt is updated; target labels are evaluation-only.")
+        logging.info("vptta_optimizer:"+str(opt.vptta_optimizer))
+        logging.info("vptta_lr:"+str(opt.vptta_lr))
+        logging.info("vptta_momentum:"+str(opt.vptta_momentum))
+        logging.info("vptta_beta1:"+str(opt.vptta_beta1))
+        logging.info("vptta_beta2:"+str(opt.vptta_beta2))
+        logging.info("vptta_weight_decay:"+str(opt.vptta_weight_decay))
+        logging.info("vptta_steps:"+str(opt.vptta_steps))
+        logging.info("vptta_memory_size:"+str(opt.vptta_memory_size))
+        logging.info("vptta_neighbor:"+str(opt.vptta_neighbor))
+        logging.info("vptta_prompt_alpha:"+str(opt.vptta_prompt_alpha))
+        logging.info("vptta_prompt_size:"+str(opt.vptta_prompt_size))
+        logging.info("vptta_image_size:"+str(opt.vptta_image_size))
+        logging.info("vptta_warm_n:"+str(opt.vptta_warm_n))
+    elif opt.tta == 'pass':
+        logging.info("=== PASS Configuration ===")
+        logging.info("PASS is source-free TTA: prompt/adaptor and optional BN affine tensors are updated; target labels are evaluation-only.")
+        logging.info("pass_optimizer:"+str(opt.pass_optimizer))
+        logging.info("pass_lr:"+str(opt.pass_lr))
+        logging.info("pass_momentum:"+str(opt.pass_momentum))
+        logging.info("pass_beta1:"+str(opt.pass_beta1))
+        logging.info("pass_beta2:"+str(opt.pass_beta2))
+        logging.info("pass_weight_decay:"+str(opt.pass_weight_decay))
+        logging.info("pass_steps:"+str(opt.pass_steps))
+        logging.info("pass_bn_alpha:"+str(opt.pass_bn_alpha))
+        logging.info("pass_bn_layers:"+str(opt.pass_bn_layers))
+        logging.info("pass_entropy_weight:"+str(opt.pass_entropy_weight))
+        logging.info("pass_ema_decay:"+str(opt.pass_ema_decay))
+        logging.info("pass_min_momentum_constant:"+str(opt.pass_min_momentum_constant))
+        logging.info("pass_episodic:"+str(opt.pass_episodic))
+        logging.info("pass_use_source_fallback:"+str(opt.pass_use_source_fallback))
+        logging.info("pass_image_size:"+str(opt.pass_image_size))
+        logging.info("pass_prompt_size:"+str(opt.pass_prompt_size))
+        logging.info("pass_adaptor_hidden:"+str(opt.pass_adaptor_hidden))
+        logging.info("pass_perturb_scale:"+str(opt.pass_perturb_scale))
+        logging.info("pass_prompt_scale:"+str(opt.pass_prompt_scale))
+        logging.info("pass_prompt_sparsity:"+str(opt.pass_prompt_sparsity))
+    elif opt.tta == 'sictta':
+        logging.info("=== SicTTA Configuration ===")
+        logging.info("SicTTA is source-free single-image continual TTA: target labels are evaluation-only.")
+        logging.info("sictta_max_lens:"+str(opt.sictta_max_lens))
+        logging.info("sictta_topk:"+str(opt.sictta_topk))
+        logging.info("sictta_threshold:"+str(opt.sictta_threshold))
+        logging.info("sictta_select_points:"+str(opt.sictta_select_points))
+        logging.info("sictta_episodic:"+str(opt.sictta_episodic))
     
     tb_writer = SummaryWriter( tbfile_dir  )
 
@@ -951,6 +1180,13 @@ if __name__ == '__main__':
         print(f"TTA: {opt.tta}")
         if opt.tta == 'tent':
             print(f"TENT config: lr={opt.tent_lr}, steps={opt.tent_steps}")
+        elif opt.tta == 'dg_tta':
+            print(
+                "DG-TTA config: MedSeg-TTA output-consistency adapter; "
+                f"lr={opt.dgtta_lr}, steps={opt.dgtta_steps}, "
+                f"strength={opt.dgtta_transform_strength}, entropy_weight={opt.dgtta_entropy_weight}, "
+                f"bn_l2_reg={opt.dgtta_bn_l2_reg}, episodic={opt.dgtta_episodic}"
+            )
         elif opt.tta == 'norm_alpha':
             print(f"norm_alpha config: alpha={opt.bn_alpha}")
         elif opt.tta == 'cotta':
@@ -1000,6 +1236,33 @@ if __name__ == '__main__':
                 f"mt={opt.gold_mt}, s_lr={opt.gold_s_lr}, adapter_scale={opt.gold_adapter_scale}, "
                 f"rst={opt.gold_rst}, ap={opt.gold_ap}, episodic={opt.gold_episodic}"
             )
+        elif opt.tta == 'vptta':
+            print(
+                "VPTTA config: source-free frequency prompt TTA; "
+                "target labels are evaluation-only. "
+                f"optimizer={opt.vptta_optimizer}, lr={opt.vptta_lr}, "
+                f"steps={opt.vptta_steps}, memory_size={opt.vptta_memory_size}, "
+                f"neighbor={opt.vptta_neighbor}, prompt_alpha={opt.vptta_prompt_alpha}, "
+                f"prompt_size={opt.vptta_prompt_size}, warm_n={opt.vptta_warm_n}"
+            )
+        elif opt.tta == 'pass':
+            print(
+                "PASS config: source-free style/shape prompt TTA; "
+                "target labels are evaluation-only. "
+                f"optimizer={opt.pass_optimizer}, lr={opt.pass_lr}, steps={opt.pass_steps}, "
+                f"bn_alpha={opt.pass_bn_alpha}, bn_layers={opt.pass_bn_layers}, "
+                f"entropy_weight={opt.pass_entropy_weight}, ema_decay={opt.pass_ema_decay}, "
+                f"source_fallback={opt.pass_use_source_fallback}, episodic={opt.pass_episodic}, "
+                f"prompt_size={opt.pass_prompt_size}"
+            )
+        elif opt.tta == 'sictta':
+            print(
+                "SicTTA config: source-free single-image continual TTA; "
+                "target labels are evaluation-only. "
+                f"max_lens={opt.sictta_max_lens}, topk={opt.sictta_topk}, "
+                f"threshold={opt.sictta_threshold}, select_points={opt.sictta_select_points}, "
+                f"episodic={opt.sictta_episodic}"
+            )
         print(f"{'='*80}\n")
 
         # Determine checkpoint path
@@ -1048,16 +1311,19 @@ if __name__ == '__main__':
                     if xx >= 50:
                         break
 
-            print("\n" + "="*80)
-            print("Testing on source domain...")
-            print("="*80)
-            if opt.tta != 'none':
-                print(f"Reloading checkpoint before source-domain evaluation to avoid carrying target {opt.tta} state.")
-                model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=source_dependent_loader)
-            with open(finalfile, 'a') as f:
-                f.write("\n\nTest on source domain\n")
-            type1 = 'tetrainfinal'
-            tmp = prediction_wrapper(tb_writer, type1, logdir, model, trte_loader, 0, label_name, save_prediction=opt.save_prediction)
+            if opt.eval_source_domain:
+                print("\n" + "="*80)
+                print("Testing on source domain...")
+                print("="*80)
+                if opt.tta != 'none':
+                    print(f"Reloading checkpoint before source-domain evaluation to avoid carrying target {opt.tta} state.")
+                    model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=source_dependent_loader)
+                with open(finalfile, 'a') as f:
+                    f.write("\n\nTest on source domain\n")
+                type1 = 'tetrainfinal'
+                tmp = prediction_wrapper(tb_writer, type1, logdir, model, trte_loader, 0, label_name, save_prediction=opt.save_prediction)
+            else:
+                print("\nSkipping source-domain evaluation (--eval_source_domain false).")
 
         print(f"\nTest completed! Results saved in: {logdir}")
         exit(0)

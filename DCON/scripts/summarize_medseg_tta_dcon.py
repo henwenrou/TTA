@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Summarize DCON TTA results against the source-only baseline.
+"""Summarize DCON-adapted MedSeg-TTA runs.
 
-Only the target-domain "Overall mean dice by sample" metric is reported.
-The source-domain evaluation appended later in out.csv is intentionally ignored.
+Only the target-domain "Overall mean dice by sample" metric is used. DCON's
+optional source-domain evaluation block is ignored when it exists.
 """
 
 import argparse
@@ -11,10 +11,10 @@ from pathlib import Path
 
 
 TASKS = [
-    ("SABSCT->CHAOST2", "SABSCT"),
-    ("CHAOST2->SABSCT", "CHAOST2"),
-    ("bSSFP->LGE", "bSSFP"),
-    ("LGE->bSSFP", "LGE"),
+    ("SABSCT->CHAOST2", "SABSCT", "sabsct_to_chaost2"),
+    ("CHAOST2->SABSCT", "CHAOST2", "chaost2_to_sabsct"),
+    ("bSSFP->LGE", "bSSFP", "bssfp_to_lge"),
+    ("LGE->bSSFP", "LGE", "lge_to_bssfp"),
 ]
 
 BASELINE = {
@@ -24,12 +24,18 @@ BASELINE = {
     "LGE->bSSFP": 0.8654,
 }
 
-EXP_NAMES = {
+LEGACY_EXP_NAMES = {
     "none": {
         "SABSCT->CHAOST2": "none_dcon_sc_sabsct",
         "CHAOST2->SABSCT": "none_dcon_cs_chaost2",
         "bSSFP->LGE": "none_dcon_bl_bssfp",
         "LGE->bSSFP": "none_dcon_lb_lge",
+    },
+    "tent": {
+        "SABSCT->CHAOST2": "tent_dcon_sc_sabsct",
+        "CHAOST2->SABSCT": "tent_dcon_cs_chaost2",
+        "bSSFP->LGE": "tent_dcon_bl_bssfp",
+        "LGE->bSSFP": "tent_dcon_lb_lge",
     },
     "norm_test": {
         "SABSCT->CHAOST2": "norm_test_dcon_sc_sabsct",
@@ -48,12 +54,6 @@ EXP_NAMES = {
         "CHAOST2->SABSCT": "norm_ema_dcon_cs_chaost2",
         "bSSFP->LGE": "norm_ema_dcon_bl_bssfp",
         "LGE->bSSFP": "norm_ema_dcon_lb_lge",
-    },
-    "tent": {
-        "SABSCT->CHAOST2": "tent_dcon_sc_sabsct",
-        "CHAOST2->SABSCT": "tent_dcon_cs_chaost2",
-        "bSSFP->LGE": "tent_dcon_bl_bssfp",
-        "LGE->bSSFP": "tent_dcon_lb_lge",
     },
     "cotta": {
         "SABSCT->CHAOST2": "cotta_dcon_sc_sabsct",
@@ -93,22 +93,27 @@ EXP_NAMES = {
     },
 }
 
+METHOD_ALIASES = {
+    "sm_ppm": ["sm_ppm", "smppm"],
+    "dg_tta": ["dg_tta", "dgtta"],
+}
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Compare TTA methods by target Overall Dice by sample."
+        description="Compare DCON TTA methods by target Overall Dice by sample."
     )
     parser.add_argument(
         "--roots",
         nargs="+",
-        default=["results", "ckpts"],
+        default=["results_medseg_tta", "results", "ckpts"],
         help="Experiment roots to search. Expected layout: <root>/<source>/<expname>/log/out.csv.",
     )
     parser.add_argument(
         "--methods",
         nargs="+",
-        default=["none", "gtta"],
-        help="Methods to include. 'none' uses the built-in baseline values.",
+        default=["none", "tent", "dg_tta", "memo", "asm", "sm_ppm", "gtta", "gold"],
+        help="Methods to include.",
     )
     return parser.parse_args()
 
@@ -124,24 +129,27 @@ def target_overall_from_out_csv(path):
     return float(match.group(1))
 
 
-def find_out_csv(roots, source, expname):
+def candidate_expnames(method, task, suffix):
+    names = [f"{method}_dcon_{suffix}"]
+    for alias in METHOD_ALIASES.get(method, []):
+        names.append(f"{alias}_dcon_{suffix}")
+    names.extend(LEGACY_EXP_NAMES.get(method, {}).get(task, "").split())
+    return [name for name in names if name]
+
+
+def find_out_csv(roots, source, expnames):
     for root in roots:
-        candidate = Path(root) / source / expname / "log" / "out.csv"
-        if candidate.exists():
-            return candidate
+        for expname in expnames:
+            candidate = Path(root) / source / expname / "log" / "out.csv"
+            if candidate.exists():
+                return candidate
     return None
 
 
 def values_for_method(method, roots):
-    if method == "none":
-        return dict(BASELINE)
-
-    if method not in EXP_NAMES:
-        raise ValueError(f"Unknown method '{method}'. Known methods: {', '.join(EXP_NAMES)}")
-
     values = {}
-    for task, source in TASKS:
-        path = find_out_csv(roots, source, EXP_NAMES[method][task])
+    for task, source, suffix in TASKS:
+        path = find_out_csv(roots, source, candidate_expnames(method, task, suffix))
         values[task] = None if path is None else target_overall_from_out_csv(path)
     return values
 
@@ -158,15 +166,20 @@ def average(values):
 
 
 def print_markdown(methods, rows):
-    headers = ["方法"] + [task for task, _ in TASKS] + ["平均", "平均 vs none"]
+    headers = ["method"] + [task for task, _, _ in TASKS] + ["avg", "avg_vs_none"]
     print("| " + " | ".join(headers) + " |")
     print("| " + " | ".join(["---"] + ["---:"] * (len(headers) - 1)) + " |")
-    baseline_avg = average(BASELINE)
+
+    baseline_values = rows.get("none")
+    baseline_avg = average(baseline_values) if baseline_values else None
+    if baseline_avg is None:
+        baseline_avg = average(BASELINE)
+
     for method in methods:
         values = rows[method]
         avg = average(values)
-        delta = None if avg is None else avg - baseline_avg
-        cells = [method] + [fmt(values[task]) for task, _ in TASKS] + [fmt(avg), fmt(delta)]
+        delta = None if avg is None or baseline_avg is None else avg - baseline_avg
+        cells = [method] + [fmt(values[task]) for task, _, _ in TASKS] + [fmt(avg), fmt(delta)]
         print("| " + " | ".join(cells) + " |")
 
 

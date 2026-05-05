@@ -170,6 +170,80 @@ To run the three bundled source-only checkpoints:
 bash scripts/tent_sourceonly_ckpts.sh
 ```
 
+## One-shot MedSeg-TTA Runs on DCON
+
+The DCON test entry point now supports the portable MedSeg-TTA-style adapters
+that can run on the existing DCON U-Net and NIfTI slice datasets:
+
+- source-free/common: `none`, `norm_test`, `norm_alpha`, `norm_ema`, `tent`,
+  `dg_tta`, `cotta`, `memo`, `gold`
+- source-dependent: `asm`, `sm_ppm`, `gtta`
+
+`dg_tta` is adapted from the MedSeg-TTA output-consistency implementation: it
+keeps DCON's model/data/evaluation path and updates only BatchNorm affine
+parameters from target-image spatial/intensity consistency.
+
+Run all supported methods across the four DCON shifts:
+
+```bash
+export SAA_DATA_ROOT=/Users/RexRyder/PycharmProjects/Dataset
+PYTHON_BIN=/path/to/your/env/bin/python bash scripts/run_medseg_tta_dcon.sh
+```
+
+Run a subset:
+
+```bash
+METHODS="none tent dg_tta gold" \
+PYTHON_BIN=/path/to/your/env/bin/python \
+bash scripts/run_medseg_tta_dcon.sh
+```
+
+The script writes results to `results_medseg_tta` by default and skips the
+source-domain re-evaluation for speed. Override with:
+
+```bash
+RESULTS_DIR=results_full EVAL_SOURCE_DOMAIN=true SAVE_PREDICTION=true \
+bash scripts/run_medseg_tta_dcon.sh
+```
+
+Summarize existing results:
+
+```bash
+python3 scripts/summarize_medseg_tta_dcon.py --roots results_medseg_tta
+```
+
+## PASS on DCON
+
+The PASS repository's prompt-based online TTA path is available as `--tta pass`
+in the DCON `train.py` test entry point. The adaptation keeps the DCON U-Net,
+NIfTI slice loaders, and Dice evaluation path, then wraps the source model with:
+
+- an image-space PASS data adaptor;
+- a bottleneck shape prompt injected before DCON's decoder;
+- source-BN statistic matching loss on target images;
+- an EMA target prompt network and optional source-prediction fallback.
+
+Run PASS across the four bundled DCON shifts:
+
+```bash
+export SAA_DATA_ROOT=/Users/RexRyder/PycharmProjects/Dataset
+PYTHON_BIN=/path/to/your/env/bin/python bash scripts/run_pass_dcon.sh
+```
+
+Useful overrides:
+
+```bash
+PASS_STEPS=2 PASS_LR=1e-3 PASS_BN_LAYERS=8 \
+PYTHON_BIN=/path/to/your/env/bin/python \
+bash scripts/run_pass_dcon.sh
+```
+
+The script writes to `results_pass_dcon` by default. Summarize with:
+
+```bash
+python3 scripts/summarize_medseg_tta_dcon.py --roots results_pass_dcon --methods pass
+```
+
 ## Medical GTTA Test-Time Adaptation
 
 The DCON GTTA adapter is a lightweight medical-image version of GTTA. It uses
@@ -200,3 +274,64 @@ python3 scripts/summarize_overall_dice.py --methods none gtta
 The summary script reads each experiment's `log/out.csv`, ignores the later
 source-domain evaluation block, and compares only target `Overall mean dice by
 sample`.
+
+## SicTTA Test-Time Adaptation
+
+SicTTA is available in test mode as a source-free, single-image continual TTA
+adapter. The DCON adapter keeps a frozen source-anchor model for CCD filtering,
+stores reliable target bottleneck features in a prototype pool, and decodes the
+current slice with the nearest reliable prototype features. Target labels are
+used only by the evaluation code.
+
+Run all four bundled source-only DCON checkpoints:
+
+```bash
+bash scripts/run_sictta_sourceonly_ckpts.sh
+```
+
+Useful overrides:
+
+```bash
+SICTTA_MAX_LENS=40 SICTTA_TOPK=5 SICTTA_THRESHOLD=0.9 \
+SAVE_PREDICTION=false EVAL_SOURCE_DOMAIN=false \
+bash scripts/run_sictta_sourceonly_ckpts.sh
+```
+
+## VPTTA Test-Time Adaptation
+
+VPTTA is available as `--tta vptta` in the DCON test entry point. This adapter
+keeps DCON's own U-Net and dataset loaders, converts the model BatchNorm layers
+to VPTTA-style BN-stat loss layers, and updates only a low-frequency FFT prompt
+for each target slice. Target labels are used only by the evaluation code.
+
+Run all bundled source-only checkpoints:
+
+```bash
+bash scripts/run_vptta_sourceonly_ckpts.sh
+```
+
+Useful overrides:
+
+```bash
+GPU_IDS=0 NUM_WORKERS=4 VPTTA_LR=1e-2 VPTTA_STEPS=1 \
+  bash scripts/run_vptta_sourceonly_ckpts.sh
+```
+
+For a single run:
+
+```bash
+python train.py \
+  --phase test \
+  --data_name CARDIAC \
+  --nclass 4 \
+  --tr_domain bSSFP \
+  --target_domain LGE \
+  --resume_path ../ckpts/dcon-bl-1200.pth \
+  --tta vptta \
+  --vptta_lr 1e-2 \
+  --vptta_steps 1 \
+  --use_cgsd 0 \
+  --use_projector 0 \
+  --use_saam 0 \
+  --use_rccs 0
+```

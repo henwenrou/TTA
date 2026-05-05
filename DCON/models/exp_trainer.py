@@ -18,8 +18,22 @@ from .saam import StabilityAwareAlignmentModule, compute_saam_loss
 from .tta_asm import ASMAdapter
 from .tta_gtta import GTTAAdapter
 from .tta_smppm import SMPPMAdapter
+from tta_dg_tta import DGTTAAdapter
 from tta_memo import build_memo_batch, marginal_entropy
 from tta_gold import GOLDAdapter
+from tta_vptta import (
+    FrequencyPrompt,
+    PromptMemory,
+    VPTTAAdapter,
+    convert_batchnorm_to_vptta,
+)
+from tta_pass import (
+    BatchNormFeatureMonitor,
+    PASSAdapter,
+    PASSPromptedUNet,
+    configure_pass_model,
+)
+from tta_sictta import SicTTAAdapter, configure_model_for_sictta
 import sys
 sys.path.append('..')
 from dataloaders.rccs import ProRandConvNet, RandomConvCandidateSelection, RCCSFeatureEncoder
@@ -358,6 +372,8 @@ class Train_process():
         self.tta_mode = getattr(opt, 'tta', 'none')
         self.tent_optimizer = None
         self.tent_param_names = []
+        self.dgtta_optimizer = None
+        self.dgtta_adapter = None
         self.cotta_optimizer = None
         self.cotta_model_ema = None
         self.cotta_model_anchor = None
@@ -374,9 +390,20 @@ class Train_process():
         self.gtta_source_loader = source_loader
         self.gold_optimizer = None
         self.gold_adapter = None
+        self.vptta_optimizer = None
+        self.vptta_prompt = None
+        self.vptta_memory = None
+        self.vptta_adapter = None
+        self.pass_optimizer = None
+        self.pass_adapter = None
+        self.pass_bn_monitor = None
+        self.pass_source_model = None
+        self.sictta_adapter = None
         if istest == 1:
             if self.tta_mode == 'tent':
                 self.configure_tent()
+            elif self.tta_mode == 'dg_tta':
+                self.configure_dg_tta()
             elif self.tta_mode == 'norm_test':
                 self.configure_alpha_norm(alpha=1.0)
             elif self.tta_mode == 'norm_alpha':
@@ -404,6 +431,12 @@ class Train_process():
                     self.configure_gtta(source_loader)
             elif self.tta_mode == 'gold':
                 self.configure_gold()
+            elif self.tta_mode == 'vptta':
+                self.configure_vptta()
+            elif self.tta_mode == 'pass':
+                self.configure_pass()
+            elif self.tta_mode == 'sictta':
+                self.configure_sictta()
 
     def configure_alpha_norm(self, alpha):
         replaced = replace_bn_with_alpha_bn(self.netseg, alpha)
@@ -432,6 +465,40 @@ class Train_process():
             weight_decay=0.0,
         )
         print(f"TENT enabled: updating {len(params)} BatchNorm affine tensors")
+        for name in names:
+            print(f"  - {name}")
+
+    def configure_dg_tta(self):
+        configure_model_for_tent(self.netseg)
+        params, names = collect_bn_affine_params(self.netseg)
+        if len(params) == 0:
+            raise RuntimeError("DG-TTA requires BatchNorm2d affine parameters, but none were found.")
+
+        self.dgtta_optimizer = torch.optim.Adam(
+            params,
+            lr=getattr(self.opt, 'dgtta_lr', 1e-4),
+            betas=(0.9, 0.999),
+            weight_decay=0.0,
+        )
+        self.dgtta_adapter = DGTTAAdapter(
+            model=self.netseg,
+            optimizer=self.dgtta_optimizer,
+            steps=getattr(self.opt, 'dgtta_steps', 1),
+            transform_strength=getattr(self.opt, 'dgtta_transform_strength', 1.0),
+            entropy_weight=getattr(self.opt, 'dgtta_entropy_weight', 0.05),
+            bn_l2_reg=getattr(self.opt, 'dgtta_bn_l2_reg', 1e-4),
+            episodic=getattr(self.opt, 'dgtta_episodic', False),
+        )
+        print(
+            "DG-TTA enabled: MedSeg-TTA output-consistency adapter updating "
+            f"{len(params)} BatchNorm affine tensors; "
+            f"lr={getattr(self.opt, 'dgtta_lr', 1e-4)}, "
+            f"steps={getattr(self.opt, 'dgtta_steps', 1)}, "
+            f"strength={getattr(self.opt, 'dgtta_transform_strength', 1.0)}, "
+            f"entropy_weight={getattr(self.opt, 'dgtta_entropy_weight', 0.05)}, "
+            f"bn_l2_reg={getattr(self.opt, 'dgtta_bn_l2_reg', 1e-4)}, "
+            f"episodic={getattr(self.opt, 'dgtta_episodic', False)}"
+        )
         for name in names:
             print(f"  - {name}")
 
@@ -742,6 +809,188 @@ class Train_process():
         print(msg)
         logger.info(msg)
 
+    def configure_vptta(self):
+        warm_n = getattr(self.opt, 'vptta_warm_n', 5)
+        converted = convert_batchnorm_to_vptta(self.netseg, warm_n=warm_n)
+        if converted == 0:
+            raise RuntimeError("VPTTA requires BatchNorm2d layers, but none were found.")
+
+        self.netseg.eval()
+        self.netseg.requires_grad_(False)
+
+        in_channels = self.netseg.convd1.conv1.in_channels if hasattr(self.netseg, 'convd1') else 3
+        self.vptta_prompt = FrequencyPrompt(
+            in_channels=in_channels,
+            image_size=getattr(self.opt, 'vptta_image_size', 192),
+            prompt_alpha=getattr(self.opt, 'vptta_prompt_alpha', 0.01),
+            prompt_size=getattr(self.opt, 'vptta_prompt_size', None),
+        ).cuda()
+
+        optimizer_name = getattr(self.opt, 'vptta_optimizer', 'Adam')
+        if optimizer_name == 'SGD':
+            self.vptta_optimizer = torch.optim.SGD(
+                self.vptta_prompt.parameters(),
+                lr=getattr(self.opt, 'vptta_lr', 1e-2),
+                momentum=getattr(self.opt, 'vptta_momentum', 0.99),
+                nesterov=True,
+                weight_decay=getattr(self.opt, 'vptta_weight_decay', 0.0),
+            )
+        elif optimizer_name == 'Adam':
+            self.vptta_optimizer = torch.optim.Adam(
+                self.vptta_prompt.parameters(),
+                lr=getattr(self.opt, 'vptta_lr', 1e-2),
+                betas=(
+                    getattr(self.opt, 'vptta_beta1', 0.9),
+                    getattr(self.opt, 'vptta_beta2', 0.99),
+                ),
+                weight_decay=getattr(self.opt, 'vptta_weight_decay', 0.0),
+            )
+        else:
+            raise ValueError(f"Unknown VPTTA optimizer: {optimizer_name}")
+
+        self.vptta_memory = PromptMemory(
+            size=getattr(self.opt, 'vptta_memory_size', 40),
+            dimension=self.vptta_prompt.data_prompt.numel(),
+        )
+        self.vptta_adapter = VPTTAAdapter(
+            model=self.netseg,
+            prompt=self.vptta_prompt,
+            optimizer=self.vptta_optimizer,
+            memory_bank=self.vptta_memory,
+            steps=getattr(self.opt, 'vptta_steps', 1),
+            neighbor=getattr(self.opt, 'vptta_neighbor', 16),
+        )
+
+        msg = (
+            "VPTTA enabled: source-free frequency prompt TTA. "
+            "Only the low-frequency prompt is updated; target labels are used only for evaluation. "
+            f"converted_bn={converted}, "
+            f"optimizer={optimizer_name}, "
+            f"lr={getattr(self.opt, 'vptta_lr', 1e-2)}, "
+            f"steps={getattr(self.opt, 'vptta_steps', 1)}, "
+            f"prompt_size={self.vptta_prompt.prompt_size}, "
+            f"prompt_alpha={getattr(self.opt, 'vptta_prompt_alpha', 0.01)}, "
+            f"memory_size={getattr(self.opt, 'vptta_memory_size', 40)}, "
+            f"neighbor={getattr(self.opt, 'vptta_neighbor', 16)}, "
+            f"warm_n={warm_n}"
+        )
+        print(msg)
+        logger.info(msg)
+
+    def configure_pass(self):
+        self.pass_source_model = deepcopy(self.netseg)
+        self.pass_source_model.eval()
+        for param in self.pass_source_model.parameters():
+            param.detach_()
+            param.requires_grad_(False)
+
+        prompt_size = getattr(self.opt, 'pass_prompt_size', None)
+        if prompt_size is None:
+            image_size = getattr(self.opt, 'pass_image_size', 192)
+            prompt_size = max(1, int(image_size) // 16)
+
+        self.netseg = PASSPromptedUNet(
+            self.netseg,
+            prompt_size=prompt_size,
+            adaptor_hidden=getattr(self.opt, 'pass_adaptor_hidden', 64),
+            perturb_scale=getattr(self.opt, 'pass_perturb_scale', 1.0),
+            prompt_scale=getattr(self.opt, 'pass_prompt_scale', 1.0),
+            prompt_sparsity=getattr(self.opt, 'pass_prompt_sparsity', 0.1),
+        ).cuda()
+
+        trainable_names = configure_pass_model(
+            self.netseg,
+            train_bn_affine=getattr(self.opt, 'pass_update_bn_affine', True),
+        )
+        params = [param for param in self.netseg.parameters() if param.requires_grad]
+        if len(params) == 0:
+            raise RuntimeError("PASS found no trainable prompt/BN parameters.")
+
+        optimizer_name = getattr(self.opt, 'pass_optimizer', 'Adam')
+        if optimizer_name == 'SGD':
+            self.pass_optimizer = torch.optim.SGD(
+                params,
+                lr=getattr(self.opt, 'pass_lr', 5e-3),
+                momentum=getattr(self.opt, 'pass_momentum', 0.99),
+                nesterov=True,
+                weight_decay=getattr(self.opt, 'pass_weight_decay', 0.0),
+            )
+        elif optimizer_name == 'Adam':
+            self.pass_optimizer = torch.optim.Adam(
+                params,
+                lr=getattr(self.opt, 'pass_lr', 5e-3),
+                betas=(
+                    getattr(self.opt, 'pass_beta1', 0.9),
+                    getattr(self.opt, 'pass_beta2', 0.999),
+                ),
+                weight_decay=getattr(self.opt, 'pass_weight_decay', 0.0),
+            )
+        else:
+            raise ValueError(f"Unknown PASS optimizer: {optimizer_name}")
+
+        self.pass_bn_monitor = BatchNormFeatureMonitor(
+            self.netseg,
+            alpha=getattr(self.opt, 'pass_bn_alpha', 0.01),
+            max_layers=getattr(self.opt, 'pass_bn_layers', 0),
+        )
+        self.pass_adapter = PASSAdapter(
+            model=self.netseg,
+            source_model=self.pass_source_model,
+            optimizer=self.pass_optimizer,
+            bn_monitor=self.pass_bn_monitor,
+            steps=getattr(self.opt, 'pass_steps', 1),
+            entropy_weight=getattr(self.opt, 'pass_entropy_weight', 0.0),
+            ema_decay=getattr(self.opt, 'pass_ema_decay', 0.94),
+            min_momentum_constant=getattr(self.opt, 'pass_min_momentum_constant', 0.01),
+            episodic=getattr(self.opt, 'pass_episodic', False),
+            use_source_fallback=getattr(self.opt, 'pass_use_source_fallback', True),
+        )
+
+        msg = (
+            "PASS enabled: source-free style/shape prompt TTA adapted to DCON U-Net. "
+            "Target labels are used only for evaluation. "
+            f"optimizer={optimizer_name}, "
+            f"lr={getattr(self.opt, 'pass_lr', 5e-3)}, "
+            f"steps={getattr(self.opt, 'pass_steps', 1)}, "
+            f"prompt_size={prompt_size}, "
+            f"bn_layers={len(self.pass_bn_monitor.records)}, "
+            f"bn_alpha={getattr(self.opt, 'pass_bn_alpha', 0.01)}, "
+            f"entropy_weight={getattr(self.opt, 'pass_entropy_weight', 0.0)}, "
+            f"ema_decay={getattr(self.opt, 'pass_ema_decay', 0.94)}, "
+            f"source_fallback={getattr(self.opt, 'pass_use_source_fallback', True)}, "
+            f"episodic={getattr(self.opt, 'pass_episodic', False)}, "
+            f"trainable_tensors={len(trainable_names)}"
+        )
+        print(msg)
+        logger.info(msg)
+        for name in trainable_names:
+            logger.info(f"  PASS trainable: {name}")
+
+    def configure_sictta(self):
+        self.sictta_adapter = SicTTAAdapter(
+            model=self.netseg,
+            num_classes=self.n_cls,
+            max_lens=getattr(self.opt, 'sictta_max_lens', 40),
+            topk=getattr(self.opt, 'sictta_topk', 5),
+            threshold=getattr(self.opt, 'sictta_threshold', 0.9),
+            select_points=getattr(self.opt, 'sictta_select_points', 200),
+            episodic=getattr(self.opt, 'sictta_episodic', False),
+        )
+        configure_model_for_sictta(self.netseg)
+
+        msg = (
+            "SicTTA enabled: source-free single-image continual TTA with "
+            "source-anchor CCD filtering and bottleneck prototype feature mixing. "
+            "Target labels are used only for evaluation. "
+            f"max_lens={getattr(self.opt, 'sictta_max_lens', 40)}, "
+            f"topk={getattr(self.opt, 'sictta_topk', 5)}, "
+            f"threshold={getattr(self.opt, 'sictta_threshold', 0.9)}, "
+            f"select_points={getattr(self.opt, 'sictta_select_points', 200)}, "
+            f"episodic={getattr(self.opt, 'sictta_episodic', False)}"
+        )
+        print(msg)
+        logger.info(msg)
+
     @torch.no_grad()
     def cotta_ensemble_prediction(self, images, ema_logits):
         inp_shape = images.shape[2:]
@@ -821,6 +1070,20 @@ class Train_process():
         seg = torch.argmax(logits.detach(), 1)
         self.netseg.zero_grad()
         self.last_tent_loss = loss.detach() if loss is not None else None
+        return self.input_mask_te, seg
+
+    @torch.enable_grad()
+    def te_func_dg_tta(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.dgtta_adapter is None:
+            raise RuntimeError("DG-TTA adapter is not initialized. Call configure_dg_tta() first.")
+
+        logits = self.dgtta_adapter.forward(self.input_img_te)
+        seg = torch.argmax(logits.detach(), 1)
+        self.netseg.zero_grad()
+        self.last_dgtta_losses = self.dgtta_adapter.last_losses
         return self.input_mask_te, seg
 
     @torch.enable_grad()
@@ -984,10 +1247,81 @@ class Train_process():
         self.last_gold_losses = self.gold_adapter.last_losses
         return self.input_mask_te, seg
 
+    @torch.enable_grad()
+    def te_func_vptta(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.vptta_adapter is None:
+            raise RuntimeError("VPTTA adapter is not initialized. Call configure_vptta() first.")
+
+        logits = self.vptta_adapter.forward(self.input_img_te)
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_vptta_losses = self.vptta_adapter.last_losses
+        return self.input_mask_te, seg
+
+    @torch.enable_grad()
+    def te_func_pass(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.pass_adapter is None:
+            raise RuntimeError("PASS adapter is not initialized. Call configure_pass() first.")
+
+        logits = self.pass_adapter.forward(
+            self.input_img_te,
+            is_start=bool(input.get('is_start', False)),
+        )
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_pass_losses = self.pass_adapter.last_losses
+        return self.input_mask_te, seg
+
+    @torch.no_grad()
+    def te_func_sictta(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.sictta_adapter is None:
+            raise RuntimeError("SicTTA adapter is not initialized. Call configure_sictta() first.")
+
+        logits = self.sictta_adapter.forward(self.input_img_te, names=input.get('names', None))
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_sictta_stats = self.sictta_adapter.last_stats
+        return self.input_mask_te, seg
+
     def te_func(self,input):
         tta_mode = getattr(self.opt, 'tta', 'none')
         if tta_mode == 'tent':
             return self.te_func_tent(input)
+        if tta_mode == 'dg_tta':
+            return self.te_func_dg_tta(input)
         if tta_mode in ['norm_test', 'norm_alpha', 'norm_ema']:
             return self.te_func_norm(input)
         if tta_mode == 'cotta':
@@ -1002,6 +1336,12 @@ class Train_process():
             return self.te_func_gtta(input)
         if tta_mode == 'gold':
             return self.te_func_gold(input)
+        if tta_mode == 'vptta':
+            return self.te_func_vptta(input)
+        if tta_mode == 'pass':
+            return self.te_func_pass(input)
+        if tta_mode == 'sictta':
+            return self.te_func_sictta(input)
 
         self.input_img_te = input['image'].float().cuda()
         self.input_mask_te = input['label'].float().cuda()

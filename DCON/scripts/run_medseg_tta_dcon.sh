@@ -3,7 +3,7 @@
 #
 # Examples:
 #   bash scripts/run_medseg_tta_dcon.sh
-#   METHODS="tent dg_tta gold" bash scripts/run_medseg_tta_dcon.sh
+#   METHODS="tent dg_tta gold a3_tta" bash scripts/run_medseg_tta_dcon.sh
 #   PYTHON_BIN=/path/to/env/bin/python SAA_DATA_ROOT=/path/to/data bash scripts/run_medseg_tta_dcon.sh
 
 set -euo pipefail
@@ -134,6 +134,46 @@ PASS_ADAPTOR_HIDDEN="${PASS_ADAPTOR_HIDDEN:-64}"
 PASS_PERTURB_SCALE="${PASS_PERTURB_SCALE:-1.0}"
 PASS_PROMPT_SCALE="${PASS_PROMPT_SCALE:-1.0}"
 PASS_PROMPT_SPARSITY="${PASS_PROMPT_SPARSITY:-0.1}"
+
+SAMTTA_LR="${SAMTTA_LR:-1e-4}"
+SAMTTA_TRANSFORM_LR="${SAMTTA_TRANSFORM_LR:-1e-2}"
+SAMTTA_WEIGHT_DECAY="${SAMTTA_WEIGHT_DECAY:-0.0}"
+SAMTTA_STEPS="${SAMTTA_STEPS:-1}"
+SAMTTA_EMA_MOMENTUM="${SAMTTA_EMA_MOMENTUM:-0.95}"
+SAMTTA_DPC_WEIGHT="${SAMTTA_DPC_WEIGHT:-1.0}"
+SAMTTA_FEATURE_WEIGHT="${SAMTTA_FEATURE_WEIGHT:-0.1}"
+SAMTTA_ENTROPY_WEIGHT="${SAMTTA_ENTROPY_WEIGHT:-0.05}"
+SAMTTA_TRANSFORM_REG_WEIGHT="${SAMTTA_TRANSFORM_REG_WEIGHT:-0.01}"
+SAMTTA_FEATURE_TEMP="${SAMTTA_FEATURE_TEMP:-2.0}"
+SAMTTA_UPDATE_SCOPE="${SAMTTA_UPDATE_SCOPE:-bn_affine}"
+SAMTTA_EPISODIC="${SAMTTA_EPISODIC:-false}"
+
+A3_LR="${A3_LR:-1e-4}"
+A3_STEPS="${A3_STEPS:-1}"
+A3_POOL_SIZE="${A3_POOL_SIZE:-40}"
+A3_TOP_K="${A3_TOP_K:-1}"
+A3_MT="${A3_MT:-0.99}"
+A3_FEATURE_LOSS_WEIGHT="${A3_FEATURE_LOSS_WEIGHT:-1.0}"
+A3_ENTROPY_MATCH_WEIGHT="${A3_ENTROPY_MATCH_WEIGHT:-5.0}"
+A3_EMA_LOSS_WEIGHT="${A3_EMA_LOSS_WEIGHT:-1.0}"
+A3_EPISODIC="${A3_EPISODIC:-false}"
+A3_RESET_ON_SCAN_START="${A3_RESET_ON_SCAN_START:-false}"
+
+SPMO_LR="${SPMO_LR:-1e-4}"
+SPMO_WEIGHT_DECAY="${SPMO_WEIGHT_DECAY:-0.0}"
+SPMO_STEPS="${SPMO_STEPS:-1}"
+SPMO_ENTROPY_WEIGHT="${SPMO_ENTROPY_WEIGHT:-1.0}"
+SPMO_PRIOR_WEIGHT="${SPMO_PRIOR_WEIGHT:-1.0}"
+SPMO_MOMENT_WEIGHT="${SPMO_MOMENT_WEIGHT:-0.05}"
+SPMO_MOMENT_MODE="${SPMO_MOMENT_MODE:-all}"
+SPMO_SOFTMAX_TEMP="${SPMO_SOFTMAX_TEMP:-1.0}"
+SPMO_SIZE_POWER="${SPMO_SIZE_POWER:-1.0}"
+SPMO_BG_ENTROPY_WEIGHT="${SPMO_BG_ENTROPY_WEIGHT:-0.1}"
+SPMO_PRIOR_EPS="${SPMO_PRIOR_EPS:-1e-6}"
+SPMO_MIN_PIXELS="${SPMO_MIN_PIXELS:-10}"
+SPMO_SOURCE_PSEUDO="${SPMO_SOURCE_PSEUDO:-hard}"
+SPMO_UPDATE_SCOPE="${SPMO_UPDATE_SCOPE:-bn_affine}"
+SPMO_EPISODIC="${SPMO_EPISODIC:-false}"
 
 if [ ! -d "${SAA_DATA_ROOT}" ]; then
   echo "SAA_DATA_ROOT does not exist: ${SAA_DATA_ROOT}" >&2
@@ -274,6 +314,55 @@ method_args() {
       if [ -n "${PASS_PROMPT_SIZE}" ]; then
         METHOD_EXTRA+=(--pass_prompt_size "${PASS_PROMPT_SIZE}")
       fi
+      ;;
+    samtta)
+      METHOD_EXTRA=(
+        --samtta_lr "${SAMTTA_LR}"
+        --samtta_transform_lr "${SAMTTA_TRANSFORM_LR}"
+        --samtta_weight_decay "${SAMTTA_WEIGHT_DECAY}"
+        --samtta_steps "${SAMTTA_STEPS}"
+        --samtta_ema_momentum "${SAMTTA_EMA_MOMENTUM}"
+        --samtta_dpc_weight "${SAMTTA_DPC_WEIGHT}"
+        --samtta_feature_weight "${SAMTTA_FEATURE_WEIGHT}"
+        --samtta_entropy_weight "${SAMTTA_ENTROPY_WEIGHT}"
+        --samtta_transform_reg_weight "${SAMTTA_TRANSFORM_REG_WEIGHT}"
+        --samtta_feature_temp "${SAMTTA_FEATURE_TEMP}"
+        --samtta_update_scope "${SAMTTA_UPDATE_SCOPE}"
+        --samtta_episodic "${SAMTTA_EPISODIC}"
+      )
+      ;;
+    spmo)
+      METHOD_EXTRA=(
+        --spmo_lr "${SPMO_LR}"
+        --spmo_weight_decay "${SPMO_WEIGHT_DECAY}"
+        --spmo_steps "${SPMO_STEPS}"
+        --spmo_entropy_weight "${SPMO_ENTROPY_WEIGHT}"
+        --spmo_prior_weight "${SPMO_PRIOR_WEIGHT}"
+        --spmo_moment_weight "${SPMO_MOMENT_WEIGHT}"
+        --spmo_moment_mode "${SPMO_MOMENT_MODE}"
+        --spmo_softmax_temp "${SPMO_SOFTMAX_TEMP}"
+        --spmo_size_power "${SPMO_SIZE_POWER}"
+        --spmo_bg_entropy_weight "${SPMO_BG_ENTROPY_WEIGHT}"
+        --spmo_prior_eps "${SPMO_PRIOR_EPS}"
+        --spmo_min_pixels "${SPMO_MIN_PIXELS}"
+        --spmo_source_pseudo "${SPMO_SOURCE_PSEUDO}"
+        --spmo_update_scope "${SPMO_UPDATE_SCOPE}"
+        --spmo_episodic "${SPMO_EPISODIC}"
+      )
+      ;;
+    a3_tta)
+      METHOD_EXTRA=(
+        --a3_lr "${A3_LR}"
+        --a3_steps "${A3_STEPS}"
+        --a3_pool_size "${A3_POOL_SIZE}"
+        --a3_top_k "${A3_TOP_K}"
+        --a3_mt "${A3_MT}"
+        --a3_feature_loss_weight "${A3_FEATURE_LOSS_WEIGHT}"
+        --a3_entropy_match_weight "${A3_ENTROPY_MATCH_WEIGHT}"
+        --a3_ema_loss_weight "${A3_EMA_LOSS_WEIGHT}"
+        --a3_episodic "${A3_EPISODIC}"
+        --a3_reset_on_scan_start "${A3_RESET_ON_SCAN_START}"
+      )
       ;;
     *)
       echo "Unknown method: ${method}" >&2

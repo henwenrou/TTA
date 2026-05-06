@@ -200,10 +200,9 @@ class A3TTAAdapter:
         return flat_features.reshape(flat_features.shape[0], channels, height, width)
 
     @torch.no_grad()
-    def _ccd_scores(self, images):
+    def _ccd_scores(self, images, model):
         scores = []
-        self.model_anchor.eval()
-        logits = _forward_logits(self.model_anchor, images)
+        logits = _forward_logits(model, images)
         probs = logits.softmax(1)
         for index in range(probs.shape[0]):
             pred = probs[index:index + 1].permute(0, 2, 3, 1).reshape(-1, self.num_classes)
@@ -214,7 +213,7 @@ class A3TTAAdapter:
     @torch.enable_grad()
     def _forward_and_adapt(self, images):
         self.model.train()
-        ccd_scores = self._ccd_scores(images)
+        ccd_scores = self._ccd_scores(images, self.model)
 
         bottleneck, skips = self._encode(images, self.model)
         logits = self._decode(bottleneck, skips, self.model)

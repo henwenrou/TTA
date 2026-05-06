@@ -244,6 +244,40 @@ The script writes to `results_pass_dcon` by default. Summarize with:
 python3 scripts/summarize_medseg_tta_dcon.py --roots results_pass_dcon --methods pass
 ```
 
+## SAM-TTA on DCON
+
+SAM-TTA is available as `--tta samtta` in the DCON test entry point. This is a
+DCON-native port of the method core rather than a replacement with the SAM
+backbone: it keeps DCON's U-Net checkpoints, NIfTI loaders, slice aggregation,
+and Dice evaluation, then adds:
+
+- a SAM-TTA-style learnable cubic Bezier input transform;
+- an EMA teacher copied from the source model;
+- teacher-confidence-weighted high/low resolution prediction consistency;
+- bottleneck feature consistency on the U-Net encoder feature;
+- lightweight model-side updates, defaulting to BatchNorm affine tensors.
+
+Run all bundled DCON source-only checkpoints:
+
+```bash
+export SAA_DATA_ROOT=/Users/RexRyder/PycharmProjects/Dataset
+PYTHON_BIN=/path/to/your/env/bin/python bash scripts/run_samtta_dcon.sh
+```
+
+Useful overrides:
+
+```bash
+SAMTTA_STEPS=2 SAMTTA_TRANSFORM_LR=5e-3 SAMTTA_UPDATE_SCOPE=bn_affine \
+SAVE_PREDICTION=false EVAL_SOURCE_DOMAIN=false \
+bash scripts/run_samtta_dcon.sh
+```
+
+The script writes to `results_samtta_dcon` by default. Summarize with:
+
+```bash
+python3 scripts/summarize_medseg_tta_dcon.py --roots results_samtta_dcon --methods samtta
+```
+
 ## Medical GTTA Test-Time Adaptation
 
 The DCON GTTA adapter is a lightweight medical-image version of GTTA. It uses
@@ -330,6 +364,50 @@ python train.py \
   --tta vptta \
   --vptta_lr 1e-2 \
   --vptta_steps 1 \
+  --use_cgsd 0 \
+  --use_projector 0 \
+  --use_saam 0 \
+  --use_rccs 0
+```
+
+## SPMO-TTA on DCON
+
+SPMO-TTA is available as `--tta spmo` in the DCON test entry point. The adapter
+keeps DCON's U-Net, NIfTI slice loaders, and Dice evaluation path. Instead of
+requiring the original SPMO `sizes/*.csv` files, it uses a frozen source model
+to build per-slice source-prediction size and shape-moment priors online, then
+updates the target model with weighted entropy, size-prior KL, and optional
+centroid / distance-to-centroid moment losses. Target labels are used only by
+the evaluator.
+
+Run all bundled source-only DCON checkpoints:
+
+```bash
+export SAA_DATA_ROOT=/Users/RexRyder/PycharmProjects/Dataset
+PYTHON_BIN=/path/to/your/env/bin/python bash scripts/run_spmo_sourceonly_ckpts.sh
+```
+
+Useful overrides:
+
+```bash
+SPMO_STEPS=2 SPMO_MOMENT_MODE=centroid SPMO_MOMENT_WEIGHT=0.02 \
+  bash scripts/run_spmo_sourceonly_ckpts.sh
+```
+
+For a single run:
+
+```bash
+python train.py \
+  --phase test \
+  --data_name CARDIAC \
+  --nclass 4 \
+  --tr_domain bSSFP \
+  --target_domain LGE \
+  --resume_path ../ckpts/dcon-bl-1200.pth \
+  --tta spmo \
+  --spmo_lr 1e-4 \
+  --spmo_steps 1 \
+  --spmo_moment_mode all \
   --use_cgsd 0 \
   --use_projector 0 \
   --use_saam 0 \

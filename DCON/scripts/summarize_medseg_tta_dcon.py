@@ -112,7 +112,7 @@ def parse_args():
     parser.add_argument(
         "--methods",
         nargs="+",
-        default=["none", "tent", "dg_tta", "memo", "asm", "sm_ppm", "gtta", "gold"],
+        default=["none", "tent", "dg_tta", "memo", "asm", "sm_ppm", "gtta", "gold", "spmo"],
         help="Methods to include.",
     )
     return parser.parse_args()

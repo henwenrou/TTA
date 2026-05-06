@@ -16,3 +16,5 @@ export SAVE_PREDICTION="${SAVE_PREDICTION:-false}"
 export EVAL_SOURCE_DOMAIN="${EVAL_SOURCE_DOMAIN:-false}"
 
 bash "${SCRIPT_DIR}/run_medseg_tta_dcon.sh"
+
+

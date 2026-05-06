@@ -312,7 +312,7 @@ def get_args():
     parser.add_argument('--eval_source_domain', type=str2bool, nargs='?', const=True, default=True,
                         help='Also evaluate the source-domain trtest split after target evaluation.')
     parser.add_argument('--tta', type=str, default='none',
-                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'dg_tta', 'cotta', 'memo', 'asm', 'sm_ppm', 'gtta', 'gold', 'vptta', 'pass', 'sictta', 'a3_tta'],
+                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'dg_tta', 'cotta', 'memo', 'asm', 'sm_ppm', 'gtta', 'gold', 'vptta', 'pass', 'samtta', 'spmo', 'sictta', 'a3_tta'],
                         help='Test-time adaptation method.')
     parser.add_argument('--bn_alpha', type=float, default=0.1,
                         help='Source/test BN-stat mixing coefficient for norm_alpha.')
@@ -511,6 +511,64 @@ def get_args():
                         help='Scale applied to PASS bottleneck prompt residual.')
     parser.add_argument('--pass_prompt_sparsity', type=float, default=0.1,
                         help='Sparse channel-attention keep ratio in PASS prompt matching.')
+    parser.add_argument('--samtta_lr', type=float, default=1e-4,
+                        help='Learning rate for SAM-TTA model-side updates.')
+    parser.add_argument('--samtta_transform_lr', type=float, default=1e-2,
+                        help='Learning rate for the SAM-TTA Bezier input transform.')
+    parser.add_argument('--samtta_weight_decay', type=float, default=0.0,
+                        help='Weight decay for SAM-TTA optimizer.')
+    parser.add_argument('--samtta_steps', type=int, default=1,
+                        help='Number of SAM-TTA adaptation steps per test batch.')
+    parser.add_argument('--samtta_ema_momentum', type=float, default=0.95,
+                        help='EMA teacher momentum for SAM-TTA.')
+    parser.add_argument('--samtta_dpc_weight', type=float, default=1.0,
+                        help='Weight for SAM-TTA dual-scale prediction consistency.')
+    parser.add_argument('--samtta_feature_weight', type=float, default=0.1,
+                        help='Weight for SAM-TTA bottleneck feature consistency.')
+    parser.add_argument('--samtta_entropy_weight', type=float, default=0.05,
+                        help='Weight for SAM-TTA prediction entropy minimization.')
+    parser.add_argument('--samtta_transform_reg_weight', type=float, default=0.01,
+                        help='Weight for preserving the source-normalized input after Bezier transform.')
+    parser.add_argument('--samtta_feature_temp', type=float, default=2.0,
+                        help='Temperature for SAM-TTA spatial feature KL.')
+    parser.add_argument('--samtta_update_scope', type=str, default='bn_affine',
+                        choices=['transform_only', 'bn_affine', 'all'],
+                        help='Model parameters updated by SAM-TTA. Default updates BN affine plus Bezier transform.')
+    parser.add_argument('--samtta_episodic', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset SAM-TTA model, transform and optimizer before each target batch.')
+    parser.add_argument('--spmo_lr', type=float, default=1e-4,
+                        help='Learning rate for SPMO BN-affine or model updates.')
+    parser.add_argument('--spmo_weight_decay', type=float, default=0.0,
+                        help='Weight decay for the SPMO optimizer.')
+    parser.add_argument('--spmo_steps', type=int, default=1,
+                        help='Number of SPMO adaptation steps per test batch.')
+    parser.add_argument('--spmo_entropy_weight', type=float, default=1.0,
+                        help='Weight for SPMO weighted entropy minimization.')
+    parser.add_argument('--spmo_prior_weight', type=float, default=1.0,
+                        help='Weight for SPMO source-prediction size prior KL loss.')
+    parser.add_argument('--spmo_moment_weight', type=float, default=0.05,
+                        help='Weight for SPMO source-prediction shape moment loss.')
+    parser.add_argument('--spmo_moment_mode', type=str, default='all',
+                        choices=['none', 'centroid', 'dist_centroid', 'all'],
+                        help='SPMO shape moment constraint to use.')
+    parser.add_argument('--spmo_softmax_temp', type=float, default=1.0,
+                        help='Softmax temperature used by SPMO adaptation.')
+    parser.add_argument('--spmo_size_power', type=float, default=1.0,
+                        help='Power used in the SPMO norm_soft_size proportion estimate.')
+    parser.add_argument('--spmo_bg_entropy_weight', type=float, default=0.1,
+                        help='Background class weight for SPMO entropy minimization.')
+    parser.add_argument('--spmo_prior_eps', type=float, default=1e-6,
+                        help='Numerical floor for SPMO source size priors.')
+    parser.add_argument('--spmo_min_pixels', type=int, default=10,
+                        help='Minimum source-predicted pixels required for foreground moment constraints.')
+    parser.add_argument('--spmo_source_pseudo', type=str, default='hard',
+                        choices=['hard', 'soft'],
+                        help='Use hard or soft frozen-source predictions as SPMO priors.')
+    parser.add_argument('--spmo_update_scope', type=str, default='bn_affine',
+                        choices=['bn_affine', 'all'],
+                        help='Parameters updated by SPMO. Original-style default is BN affine only.')
+    parser.add_argument('--spmo_episodic', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset SPMO model and optimizer before each target batch.')
     parser.add_argument('--sictta_max_lens', type=int, default=40,
                         help='Maximum number of reliable target bottleneck prototypes kept by SicTTA.')
     parser.add_argument('--sictta_topk', type=int, default=5,
@@ -844,6 +902,48 @@ def get_args():
         raise ValueError(f"Invalid pass_prompt_scale={args.pass_prompt_scale}. Must be >= 0")
     if not (0.0 < args.pass_prompt_sparsity <= 1.0):
         raise ValueError(f"Invalid pass_prompt_sparsity={args.pass_prompt_sparsity}. Must be in (0, 1]")
+    if args.samtta_lr <= 0:
+        raise ValueError(f"Invalid samtta_lr={args.samtta_lr}. Must be > 0")
+    if args.samtta_transform_lr <= 0:
+        raise ValueError(f"Invalid samtta_transform_lr={args.samtta_transform_lr}. Must be > 0")
+    if args.samtta_weight_decay < 0:
+        raise ValueError(f"Invalid samtta_weight_decay={args.samtta_weight_decay}. Must be >= 0")
+    if args.samtta_steps < 1:
+        raise ValueError(f"Invalid samtta_steps={args.samtta_steps}. Must be >= 1")
+    if not (0.0 <= args.samtta_ema_momentum <= 1.0):
+        raise ValueError(f"Invalid samtta_ema_momentum={args.samtta_ema_momentum}. Must be in [0, 1]")
+    if args.samtta_dpc_weight < 0:
+        raise ValueError("samtta_dpc_weight must be >= 0")
+    if args.samtta_feature_weight < 0:
+        raise ValueError("samtta_feature_weight must be >= 0")
+    if args.samtta_entropy_weight < 0:
+        raise ValueError("samtta_entropy_weight must be >= 0")
+    if args.samtta_transform_reg_weight < 0:
+        raise ValueError("samtta_transform_reg_weight must be >= 0")
+    if args.samtta_feature_temp <= 0:
+        raise ValueError(f"Invalid samtta_feature_temp={args.samtta_feature_temp}. Must be > 0")
+    if args.spmo_lr <= 0:
+        raise ValueError(f"Invalid spmo_lr={args.spmo_lr}. Must be > 0")
+    if args.spmo_weight_decay < 0:
+        raise ValueError(f"Invalid spmo_weight_decay={args.spmo_weight_decay}. Must be >= 0")
+    if args.spmo_steps < 1:
+        raise ValueError(f"Invalid spmo_steps={args.spmo_steps}. Must be >= 1")
+    if args.spmo_entropy_weight < 0:
+        raise ValueError("spmo_entropy_weight must be >= 0")
+    if args.spmo_prior_weight < 0:
+        raise ValueError("spmo_prior_weight must be >= 0")
+    if args.spmo_moment_weight < 0:
+        raise ValueError("spmo_moment_weight must be >= 0")
+    if args.spmo_softmax_temp <= 0:
+        raise ValueError(f"Invalid spmo_softmax_temp={args.spmo_softmax_temp}. Must be > 0")
+    if args.spmo_size_power <= 0:
+        raise ValueError(f"Invalid spmo_size_power={args.spmo_size_power}. Must be > 0")
+    if args.spmo_bg_entropy_weight < 0:
+        raise ValueError("spmo_bg_entropy_weight must be >= 0")
+    if args.spmo_prior_eps <= 0:
+        raise ValueError(f"Invalid spmo_prior_eps={args.spmo_prior_eps}. Must be > 0")
+    if args.spmo_min_pixels < 0:
+        raise ValueError("spmo_min_pixels must be >= 0")
     if args.sictta_max_lens < 1:
         raise ValueError(f"Invalid sictta_max_lens={args.sictta_max_lens}. Must be >= 1")
     if args.sictta_topk < 1:
@@ -1098,6 +1198,39 @@ if __name__ == '__main__':
         logging.info("pass_perturb_scale:"+str(opt.pass_perturb_scale))
         logging.info("pass_prompt_scale:"+str(opt.pass_prompt_scale))
         logging.info("pass_prompt_sparsity:"+str(opt.pass_prompt_sparsity))
+    elif opt.tta == 'samtta':
+        logging.info("=== SAM-TTA Configuration ===")
+        logging.info("SAM-TTA is source-free TTA: Bezier input transform plus EMA teacher-student consistency; target labels are evaluation-only.")
+        logging.info("samtta_lr:"+str(opt.samtta_lr))
+        logging.info("samtta_transform_lr:"+str(opt.samtta_transform_lr))
+        logging.info("samtta_weight_decay:"+str(opt.samtta_weight_decay))
+        logging.info("samtta_steps:"+str(opt.samtta_steps))
+        logging.info("samtta_ema_momentum:"+str(opt.samtta_ema_momentum))
+        logging.info("samtta_dpc_weight:"+str(opt.samtta_dpc_weight))
+        logging.info("samtta_feature_weight:"+str(opt.samtta_feature_weight))
+        logging.info("samtta_entropy_weight:"+str(opt.samtta_entropy_weight))
+        logging.info("samtta_transform_reg_weight:"+str(opt.samtta_transform_reg_weight))
+        logging.info("samtta_feature_temp:"+str(opt.samtta_feature_temp))
+        logging.info("samtta_update_scope:"+str(opt.samtta_update_scope))
+        logging.info("samtta_episodic:"+str(opt.samtta_episodic))
+    elif opt.tta == 'spmo':
+        logging.info("=== SPMO Configuration ===")
+        logging.info("SPMO is source-free shape-moment TTA: a frozen source model supplies priors; target labels are evaluation-only.")
+        logging.info("spmo_lr:"+str(opt.spmo_lr))
+        logging.info("spmo_weight_decay:"+str(opt.spmo_weight_decay))
+        logging.info("spmo_steps:"+str(opt.spmo_steps))
+        logging.info("spmo_entropy_weight:"+str(opt.spmo_entropy_weight))
+        logging.info("spmo_prior_weight:"+str(opt.spmo_prior_weight))
+        logging.info("spmo_moment_weight:"+str(opt.spmo_moment_weight))
+        logging.info("spmo_moment_mode:"+str(opt.spmo_moment_mode))
+        logging.info("spmo_softmax_temp:"+str(opt.spmo_softmax_temp))
+        logging.info("spmo_size_power:"+str(opt.spmo_size_power))
+        logging.info("spmo_bg_entropy_weight:"+str(opt.spmo_bg_entropy_weight))
+        logging.info("spmo_prior_eps:"+str(opt.spmo_prior_eps))
+        logging.info("spmo_min_pixels:"+str(opt.spmo_min_pixels))
+        logging.info("spmo_source_pseudo:"+str(opt.spmo_source_pseudo))
+        logging.info("spmo_update_scope:"+str(opt.spmo_update_scope))
+        logging.info("spmo_episodic:"+str(opt.spmo_episodic))
     elif opt.tta == 'sictta':
         logging.info("=== SicTTA Configuration ===")
         logging.info("SicTTA is source-free single-image continual TTA: target labels are evaluation-only.")
@@ -1303,6 +1436,27 @@ if __name__ == '__main__':
                 f"entropy_weight={opt.pass_entropy_weight}, ema_decay={opt.pass_ema_decay}, "
                 f"source_fallback={opt.pass_use_source_fallback}, episodic={opt.pass_episodic}, "
                 f"prompt_size={opt.pass_prompt_size}"
+            )
+        elif opt.tta == 'samtta':
+            print(
+                "SAM-TTA config: source-free Bezier input transform plus EMA teacher-student TTA; "
+                "target labels are evaluation-only. "
+                f"lr={opt.samtta_lr}, transform_lr={opt.samtta_transform_lr}, "
+                f"steps={opt.samtta_steps}, ema={opt.samtta_ema_momentum}, "
+                f"dpc_w={opt.samtta_dpc_weight}, feature_w={opt.samtta_feature_weight}, "
+                f"entropy_w={opt.samtta_entropy_weight}, "
+                f"transform_reg_w={opt.samtta_transform_reg_weight}, "
+                f"scope={opt.samtta_update_scope}, episodic={opt.samtta_episodic}"
+            )
+        elif opt.tta == 'spmo':
+            print(
+                "SPMO config: source-free shape-moment TTA; "
+                "a frozen source model supplies per-slice size/moment priors, target labels are evaluation-only. "
+                f"lr={opt.spmo_lr}, steps={opt.spmo_steps}, "
+                f"entropy_w={opt.spmo_entropy_weight}, prior_w={opt.spmo_prior_weight}, "
+                f"moment_w={opt.spmo_moment_weight}, moment_mode={opt.spmo_moment_mode}, "
+                f"source_pseudo={opt.spmo_source_pseudo}, scope={opt.spmo_update_scope}, "
+                f"episodic={opt.spmo_episodic}"
             )
         elif opt.tta == 'sictta':
             print(

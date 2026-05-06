@@ -34,6 +34,7 @@ from tta_pass import (
     configure_pass_model,
 )
 from tta_sictta import SicTTAAdapter, configure_model_for_sictta
+from tta_samtta import SAMTTAAdapter, SAMTTABezierTransform, configure_model_for_samtta
 from tta_a3_tta import A3TTAAdapter, configure_model_for_a3_tta
 from tta_spmo import SPMOAdapter
 import sys
@@ -400,6 +401,9 @@ class Train_process():
         self.pass_adapter = None
         self.pass_bn_monitor = None
         self.pass_source_model = None
+        self.samtta_optimizer = None
+        self.samtta_transform = None
+        self.samtta_adapter = None
         self.spmo_optimizer = None
         self.spmo_adapter = None
         self.spmo_source_model = None
@@ -442,6 +446,8 @@ class Train_process():
                 self.configure_vptta()
             elif self.tta_mode == 'pass':
                 self.configure_pass()
+            elif self.tta_mode == 'samtta':
+                self.configure_samtta()
             elif self.tta_mode == 'spmo':
                 self.configure_spmo()
             elif self.tta_mode == 'sictta':
@@ -977,6 +983,133 @@ class Train_process():
         for name in trainable_names:
             logger.info(f"  PASS trainable: {name}")
 
+    def configure_samtta(self):
+        update_scope = getattr(self.opt, 'samtta_update_scope', 'bn_affine')
+        model_params, model_param_names = configure_model_for_samtta(
+            self.netseg,
+            update_scope=update_scope,
+        )
+
+        self.samtta_transform = SAMTTABezierTransform().cuda()
+        param_groups = [
+            {
+                'params': list(self.samtta_transform.parameters()),
+                'lr': getattr(self.opt, 'samtta_transform_lr', 1e-2),
+            }
+        ]
+        if len(model_params) > 0:
+            param_groups.append({
+                'params': model_params,
+                'lr': getattr(self.opt, 'samtta_lr', 1e-4),
+            })
+
+        self.samtta_optimizer = torch.optim.Adam(
+            param_groups,
+            betas=(0.9, 0.999),
+            weight_decay=getattr(self.opt, 'samtta_weight_decay', 0.0),
+        )
+        self.samtta_adapter = SAMTTAAdapter(
+            model=self.netseg,
+            transform=self.samtta_transform,
+            optimizer=self.samtta_optimizer,
+            steps=getattr(self.opt, 'samtta_steps', 1),
+            ema_momentum=getattr(self.opt, 'samtta_ema_momentum', 0.95),
+            dpc_weight=getattr(self.opt, 'samtta_dpc_weight', 1.0),
+            feature_weight=getattr(self.opt, 'samtta_feature_weight', 0.1),
+            entropy_weight=getattr(self.opt, 'samtta_entropy_weight', 0.05),
+            transform_reg_weight=getattr(self.opt, 'samtta_transform_reg_weight', 0.01),
+            feature_temp=getattr(self.opt, 'samtta_feature_temp', 2.0),
+            episodic=getattr(self.opt, 'samtta_episodic', False),
+        )
+
+        msg = (
+            "SAM-TTA enabled: source-free Bezier input transform plus EMA teacher-student "
+            "prediction/feature consistency adapted to DCON U-Net. "
+            "Target labels are used only for evaluation. "
+            f"scope={update_scope}, "
+            f"lr={getattr(self.opt, 'samtta_lr', 1e-4)}, "
+            f"transform_lr={getattr(self.opt, 'samtta_transform_lr', 1e-2)}, "
+            f"steps={getattr(self.opt, 'samtta_steps', 1)}, "
+            f"ema={getattr(self.opt, 'samtta_ema_momentum', 0.95)}, "
+            f"dpc_w={getattr(self.opt, 'samtta_dpc_weight', 1.0)}, "
+            f"feature_w={getattr(self.opt, 'samtta_feature_weight', 0.1)}, "
+            f"entropy_w={getattr(self.opt, 'samtta_entropy_weight', 0.05)}, "
+            f"transform_reg_w={getattr(self.opt, 'samtta_transform_reg_weight', 0.01)}, "
+            f"episodic={getattr(self.opt, 'samtta_episodic', False)}, "
+            f"trainable_model_tensors={len(model_param_names)}"
+        )
+        print(msg)
+        logger.info(msg)
+        for name in model_param_names:
+            logger.info(f"  SAM-TTA trainable: {name}")
+
+    def configure_spmo(self):
+        self.spmo_source_model = deepcopy(self.netseg)
+        self.spmo_source_model.eval()
+        for param in self.spmo_source_model.parameters():
+            param.detach_()
+            param.requires_grad_(False)
+
+        update_scope = getattr(self.opt, 'spmo_update_scope', 'bn_affine')
+        if update_scope == 'bn_affine':
+            configure_model_for_tent(self.netseg)
+            params, names = collect_bn_affine_params(self.netseg)
+            if len(params) == 0:
+                raise RuntimeError("SPMO requires BatchNorm2d affine parameters, but none were found.")
+            trainable_desc = f"{len(params)} BatchNorm affine tensors"
+        elif update_scope == 'all':
+            self.netseg.train()
+            self.netseg.requires_grad_(True)
+            params = [param for param in self.netseg.parameters() if param.requires_grad]
+            names = [name for name, param in self.netseg.named_parameters() if param.requires_grad]
+            trainable_desc = f"all segmentation parameters ({len(params)} tensors)"
+        else:
+            raise ValueError(f"Unknown spmo_update_scope: {update_scope}")
+
+        self.spmo_optimizer = torch.optim.Adam(
+            params,
+            lr=getattr(self.opt, 'spmo_lr', 1e-4),
+            betas=(0.9, 0.999),
+            weight_decay=getattr(self.opt, 'spmo_weight_decay', 0.0),
+        )
+        self.spmo_adapter = SPMOAdapter(
+            model=self.netseg,
+            source_model=self.spmo_source_model,
+            optimizer=self.spmo_optimizer,
+            num_classes=self.n_cls,
+            steps=getattr(self.opt, 'spmo_steps', 1),
+            entropy_weight=getattr(self.opt, 'spmo_entropy_weight', 1.0),
+            prior_weight=getattr(self.opt, 'spmo_prior_weight', 1.0),
+            moment_weight=getattr(self.opt, 'spmo_moment_weight', 0.05),
+            moment_mode=getattr(self.opt, 'spmo_moment_mode', 'all'),
+            softmax_temp=getattr(self.opt, 'spmo_softmax_temp', 1.0),
+            size_power=getattr(self.opt, 'spmo_size_power', 1.0),
+            bg_entropy_weight=getattr(self.opt, 'spmo_bg_entropy_weight', 0.1),
+            prior_eps=getattr(self.opt, 'spmo_prior_eps', 1e-6),
+            min_pixels=getattr(self.opt, 'spmo_min_pixels', 10),
+            source_pseudo=getattr(self.opt, 'spmo_source_pseudo', 'hard'),
+            episodic=getattr(self.opt, 'spmo_episodic', False),
+        )
+
+        msg = (
+            "SPMO enabled: source-free shape-moment TTA adapted to DCON. "
+            "A frozen source model supplies per-slice size and moment priors; "
+            "target labels are used only for evaluation. "
+            f"scope={update_scope}, trainable={trainable_desc}, "
+            f"lr={getattr(self.opt, 'spmo_lr', 1e-4)}, "
+            f"steps={getattr(self.opt, 'spmo_steps', 1)}, "
+            f"entropy_weight={getattr(self.opt, 'spmo_entropy_weight', 1.0)}, "
+            f"prior_weight={getattr(self.opt, 'spmo_prior_weight', 1.0)}, "
+            f"moment_weight={getattr(self.opt, 'spmo_moment_weight', 0.05)}, "
+            f"moment_mode={getattr(self.opt, 'spmo_moment_mode', 'all')}, "
+            f"source_pseudo={getattr(self.opt, 'spmo_source_pseudo', 'hard')}, "
+            f"episodic={getattr(self.opt, 'spmo_episodic', False)}"
+        )
+        print(msg)
+        logger.info(msg)
+        for name in names:
+            logger.info(f"  SPMO trainable: {name}")
+
     def configure_sictta(self):
         self.sictta_adapter = SicTTAAdapter(
             model=self.netseg,
@@ -1350,6 +1483,50 @@ class Train_process():
         self.last_pass_losses = self.pass_adapter.last_losses
         return self.input_mask_te, seg
 
+    @torch.enable_grad()
+    def te_func_samtta(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.samtta_adapter is None:
+            raise RuntimeError("SAM-TTA adapter is not initialized. Call configure_samtta() first.")
+
+        logits = self.samtta_adapter.forward(self.input_img_te)
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_samtta_losses = self.samtta_adapter.last_losses
+        return self.input_mask_te, seg
+
+    @torch.enable_grad()
+    def te_func_spmo(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.spmo_adapter is None:
+            raise RuntimeError("SPMO adapter is not initialized. Call configure_spmo() first.")
+
+        logits = self.spmo_adapter.forward(self.input_img_te)
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_spmo_losses = self.spmo_adapter.last_losses
+        return self.input_mask_te, seg
+
     @torch.no_grad()
     def te_func_sictta(self, input):
         self.input_img_te = input['image'].float().cuda()
@@ -1422,6 +1599,10 @@ class Train_process():
             return self.te_func_vptta(input)
         if tta_mode == 'pass':
             return self.te_func_pass(input)
+        if tta_mode == 'samtta':
+            return self.te_func_samtta(input)
+        if tta_mode == 'spmo':
+            return self.te_func_spmo(input)
         if tta_mode == 'sictta':
             return self.te_func_sictta(input)
         if tta_mode == 'a3_tta':

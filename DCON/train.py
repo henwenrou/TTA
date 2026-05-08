@@ -1307,6 +1307,18 @@ if __name__ == '__main__':
             print(f"   Auto-correcting to nclass={expected_nclass}")
             opt.nclass = expected_nclass
 
+    smppm_requires_source_loader = (
+        opt.phase == 'test'
+        and opt.tta == 'sm_ppm'
+        and opt.smppm_ablation_mode != 'source_free_proto'
+    )
+    smppm_source_free_proto = (
+        opt.phase == 'test'
+        and opt.tta == 'sm_ppm'
+        and opt.smppm_ablation_mode == 'source_free_proto'
+    )
+    smppm_use_plain_source_set = smppm_requires_source_loader and opt.smppm_plain_source_loader
+
     if opt.data_name == 'ABDOMINAL':
         if opt.tr_domain=='SABSCT':
             tr_domain=['SABSCT']
@@ -1315,7 +1327,10 @@ if __name__ == '__main__':
             tr_domain=['CHAOST2']
             te_domain =[opt.target_domain if opt.target_domain is not None else 'SABSCT']
 
-        train_set  = ABD.get_training(modality = tr_domain ,norm_func = None,opt = opt)
+        if smppm_use_plain_source_set:
+            train_set = ABD.get_training_plain(modality = tr_domain, norm_func = None, opt = opt)
+        else:
+            train_set  = ABD.get_training(modality = tr_domain ,norm_func = None,opt = opt)
         tr_valset  = ABD.get_trval(modality = tr_domain, norm_func = train_set.normalize_op,opt = opt) 
         tr_teset   = ABD.get_trtest(modality = tr_domain, norm_func = train_set.normalize_op,opt = opt)
         test_set   = ABD.get_test(modality = te_domain, norm_func = None,opt = opt) 
@@ -1340,7 +1355,10 @@ if __name__ == '__main__':
         else:
             tr_domain=['bSSFP']
             te_domain=[opt.target_domain if opt.target_domain is not None else 'LGE']
-        train_set       = cardiac_cls.get_training(modality = tr_domain , opt = opt)
+        if smppm_use_plain_source_set:
+            train_set = cardiac_cls.get_training_plain(modality = tr_domain, opt = opt)
+        else:
+            train_set       = cardiac_cls.get_training(modality = tr_domain , opt = opt)
         tr_valset  = cardiac_cls.get_trval(modality = tr_domain , opt = opt)
         tr_teset  = cardiac_cls.get_trtest(modality = tr_domain , opt = opt)#as dataset split,cardiac didn't have this
         test_set        = cardiac_cls.get_test(modality = te_domain , opt = opt)
@@ -1357,36 +1375,14 @@ if __name__ == '__main__':
         print(f"   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation")
         effective_prefetch_factor = 2
 
-    smppm_requires_source_loader = (
-        opt.phase == 'test'
-        and opt.tta == 'sm_ppm'
-        and opt.smppm_ablation_mode != 'source_free_proto'
-    )
-    smppm_source_free_proto = (
-        opt.phase == 'test'
-        and opt.tta == 'sm_ppm'
-        and opt.smppm_ablation_mode == 'source_free_proto'
-    )
     source_set_for_loader = train_set
-    if smppm_requires_source_loader and opt.smppm_plain_source_loader:
-        if opt.data_name == 'ABDOMINAL':
-            source_set_for_loader = ABD.get_training_plain(
-                modality=tr_domain,
-                norm_func=train_set.normalize_op,
-                opt=opt,
-            )
-        elif opt.data_name == 'CARDIAC':
-            source_set_for_loader = cardiac_cls.get_training_plain(
-                modality=tr_domain,
-                opt=opt,
-            )
-        elif opt.data_name == 'PROSTATE' and hasattr(PROS, 'get_training_plain'):
-            source_set_for_loader = PROS.get_training_plain(modality=tr_domain, opt=opt)
-        else:
-            print(
-                "SM-PPM plain source loader requested but unavailable for "
-                f"{opt.data_name}; falling back to the augmented training loader."
-            )
+    if smppm_use_plain_source_set and opt.data_name == 'PROSTATE' and hasattr(PROS, 'get_training_plain'):
+        source_set_for_loader = PROS.get_training_plain(modality=tr_domain, opt=opt)
+    elif smppm_use_plain_source_set and opt.data_name == 'PROSTATE':
+        print(
+            "SM-PPM plain source loader requested but unavailable for PROSTATE; "
+            "falling back to the augmented training loader."
+        )
 
     source_train_batch_size = opt.batchSize
     if opt.phase == 'test' and opt.tta == 'asm':
@@ -1425,14 +1421,34 @@ if __name__ == '__main__':
     )
     if needs_train_loader:
         train_loader_dataset = source_set_for_loader if smppm_requires_source_loader else train_set
-        train_loader = DataLoader(dataset = train_loader_dataset, num_workers = opt.num_workers,\
-                batch_size = source_train_batch_size, shuffle = True, drop_last = True, worker_init_fn = worker_init_fn, \
-                pin_memory = True, prefetch_factor = effective_prefetch_factor, persistent_workers=(opt.num_workers > 0))  # Keep workers alive across epochs.
+        train_loader_kwargs = {
+            "dataset": train_loader_dataset,
+            "num_workers": opt.num_workers,
+            "batch_size": source_train_batch_size,
+            "shuffle": True,
+            "drop_last": True,
+            "pin_memory": True,
+        }
+        if opt.num_workers > 0:
+            train_loader_kwargs["worker_init_fn"] = worker_init_fn
+            train_loader_kwargs["prefetch_factor"] = effective_prefetch_factor
+            train_loader_kwargs["persistent_workers"] = True
+        train_loader = DataLoader(**train_loader_kwargs)
     else:
         train_loader = None
-    trval_loader=DataLoader(dataset = tr_valset, num_workers = opt.num_workers,batch_size = 1, shuffle = False, pin_memory = True, prefetch_factor = effective_prefetch_factor)
-    trte_loader=DataLoader(dataset = tr_teset, num_workers = opt.num_workers,batch_size = 1, shuffle = False, pin_memory = True, prefetch_factor = effective_prefetch_factor)
-    test_loader = DataLoader(dataset = test_set, num_workers = opt.num_workers,batch_size = 1, shuffle = False, pin_memory = True, prefetch_factor = effective_prefetch_factor)
+
+    eval_loader_kwargs = {
+        "num_workers": opt.num_workers,
+        "batch_size": 1,
+        "shuffle": False,
+        "pin_memory": True,
+    }
+    if opt.num_workers > 0:
+        eval_loader_kwargs["prefetch_factor"] = effective_prefetch_factor
+        eval_loader_kwargs["persistent_workers"] = True
+    trval_loader=DataLoader(dataset = tr_valset, **eval_loader_kwargs)
+    trte_loader=DataLoader(dataset = tr_teset, **eval_loader_kwargs)
+    test_loader = DataLoader(dataset = test_set, **eval_loader_kwargs)
 
     # ========== TEST MODE ==========
     if opt.phase == 'test':

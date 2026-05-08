@@ -10,7 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 cd "${PROJECT_DIR}"
 
-NUM_WORKERS=${NUM_WORKERS:-4}
+NUM_WORKERS=${NUM_WORKERS:-0}
+PREFETCH_FACTOR=${PREFETCH_FACTOR:-1}
 GPU_IDS=${GPU_IDS:-0}
 if [ -z "${PYTHON_BIN:-}" ]; then
   if command -v python >/dev/null 2>&1; then
@@ -20,6 +21,8 @@ if [ -z "${PYTHON_BIN:-}" ]; then
   fi
 fi
 RESULTS_DIR=${RESULTS_DIR:-results}
+SAVE_PREDICTION=${SAVE_PREDICTION:-false}
+EVAL_SOURCE_DOMAIN=${EVAL_SOURCE_DOMAIN:-false}
 
 SMPPM_LR=${SMPPM_LR:-2.5e-4}
 SMPPM_MOMENTUM=${SMPPM_MOMENTUM:-0.9}
@@ -33,6 +36,7 @@ SMPPM_SOURCE_FREE_TAU=${SMPPM_SOURCE_FREE_TAU:-0.7}
 SMPPM_SOURCE_FREE_ENTROPY_THRESHOLD=${SMPPM_SOURCE_FREE_ENTROPY_THRESHOLD:-}
 SMPPM_SOURCE_FREE_ENTROPY_WEIGHT=${SMPPM_SOURCE_FREE_ENTROPY_WEIGHT:-1.0}
 SMPPM_SOURCE_FREE_LAMBDA_PROTO=${SMPPM_SOURCE_FREE_LAMBDA_PROTO:-1.0}
+SMPPM_PLAIN_SOURCE_LOADER=${SMPPM_PLAIN_SOURCE_LOADER:-true}
 
 SMPPM_ABLATION_MODE=${SMPPM_ABLATION_MODE:-full}
 if [ "${SMPPM_ABLATION_MODE}" = "all" ]; then
@@ -83,6 +87,9 @@ run_smppm() {
     --restore_from "${ckpt}" \
     --gpu_ids "${GPU_IDS}" \
     --num_workers "${NUM_WORKERS}" \
+    --prefetch_factor "${PREFETCH_FACTOR}" \
+    --save_prediction "${SAVE_PREDICTION}" \
+    --eval_source_domain "${EVAL_SOURCE_DOMAIN}" \
     --tta sm_ppm \
     --smppm_lr "${SMPPM_LR}" \
     --smppm_momentum "${SMPPM_MOMENTUM}" \
@@ -97,6 +104,7 @@ run_smppm() {
     "${entropy_threshold_args[@]}" \
     --smppm_source_free_entropy_weight "${SMPPM_SOURCE_FREE_ENTROPY_WEIGHT}" \
     --smppm_source_free_lambda_proto "${SMPPM_SOURCE_FREE_LAMBDA_PROTO}" \
+    --smppm_plain_source_loader "${SMPPM_PLAIN_SOURCE_LOADER}" \
     --use_cgsd 0 \
     --use_projector 0 \
     --use_saam 0 \

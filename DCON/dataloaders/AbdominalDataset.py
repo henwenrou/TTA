@@ -123,6 +123,8 @@ class AbdominalDataset(torch_data.Dataset):
 
         if self.phase == 'train':
             return tr_trids
+        elif self.phase == 'trainsup':
+            return tr_trids
         elif self.phase == 'trval':
             return tr_valids
         elif self.phase == 'trtest':
@@ -353,6 +355,10 @@ def get_training(modality,norm_func, opt):
     tr_func  = trans.transform_with_label(trans.pre_aug)
     # Mainline training uses tile_z_dim=3 to convert 1-channel slices to 3-channel input.
     return AbdominalDataset(mode = 'train',transforms = tr_func,domains = modality,base_dir = BASEDIR,extern_norm_fn =norm_func,opt=opt, tile_z_dim=3)
+
+def get_training_plain(modality, norm_func, opt):
+    print("get_train_plain abd:",modality)
+    return AbdominalDataset(mode = 'trainsup',transforms = None,domains = modality,base_dir = BASEDIR,extern_norm_fn = norm_func,opt=opt, tile_z_dim=3)
 
 def get_trval(modality, norm_func, opt):
     print("get_trval abd:",modality)

@@ -122,6 +122,8 @@ class CardiacDataset(torch_data.Dataset):
 
         if self.phase == 'train':
             return tr_trids
+        elif self.phase == 'trainsup':
+            return tr_trids
         elif self.phase == 'trval':
             return tr_valids
         elif self.phase == 'trtest':
@@ -351,6 +353,10 @@ def get_training(modality, opt):
     
     tr_func  = trans.transform_with_label(trans.pre_aug)
     return CardiacDataset(mode = 'train',transforms = tr_func,domains = modality,base_dir = BASEDIR,extern_norm_fn = None,opt=opt)
+
+def get_training_plain(modality, opt):
+    print("get_train_plain cardiac:",modality)
+    return CardiacDataset(mode = 'trainsup',transforms = None,domains = modality,base_dir = BASEDIR,extern_norm_fn = None,opt=opt)
 
 def get_trval(modality, opt):
     print("get_trval cardiac:",modality)

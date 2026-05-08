@@ -398,6 +398,8 @@ def get_args():
                         help='Weight for source_free_proto masked entropy minimization.')
     parser.add_argument('--smppm_source_free_lambda_proto', type=float, default=1.0,
                         help='Weight for source_free_proto target prototype compactness.')
+    parser.add_argument('--smppm_plain_source_loader', type=str2bool, nargs='?', const=True, default=True,
+                        help='Use non-augmented source-train slices for SM-PPM source CE ablations during test.')
     parser.add_argument('--gtta_lr', type=float, default=2.5e-4,
                         help='Learning rate for GTTA supervised source and target pseudo-label updates.')
     parser.add_argument('--gtta_momentum', type=float, default=0.9,
@@ -1153,6 +1155,7 @@ if __name__ == '__main__':
         logging.info("smppm_source_free_entropy_threshold:"+str(opt.smppm_source_free_entropy_threshold))
         logging.info("smppm_source_free_entropy_weight:"+str(opt.smppm_source_free_entropy_weight))
         logging.info("smppm_source_free_lambda_proto:"+str(opt.smppm_source_free_lambda_proto))
+        logging.info("smppm_plain_source_loader:"+str(opt.smppm_plain_source_loader))
     elif opt.tta == 'gtta':
         logging.info("=== GTTA Configuration ===")
         logging.info("GTTA is source-dependent TTA: source labels supervise adaptation; target labels are evaluation-only.")
@@ -1364,6 +1367,26 @@ if __name__ == '__main__':
         and opt.tta == 'sm_ppm'
         and opt.smppm_ablation_mode == 'source_free_proto'
     )
+    source_set_for_loader = train_set
+    if smppm_requires_source_loader and opt.smppm_plain_source_loader:
+        if opt.data_name == 'ABDOMINAL':
+            source_set_for_loader = ABD.get_training_plain(
+                modality=tr_domain,
+                norm_func=train_set.normalize_op,
+                opt=opt,
+            )
+        elif opt.data_name == 'CARDIAC':
+            source_set_for_loader = cardiac_cls.get_training_plain(
+                modality=tr_domain,
+                opt=opt,
+            )
+        elif opt.data_name == 'PROSTATE' and hasattr(PROS, 'get_training_plain'):
+            source_set_for_loader = PROS.get_training_plain(modality=tr_domain, opt=opt)
+        else:
+            print(
+                "SM-PPM plain source loader requested but unavailable for "
+                f"{opt.data_name}; falling back to the augmented training loader."
+            )
 
     source_train_batch_size = opt.batchSize
     if opt.phase == 'test' and opt.tta == 'asm':
@@ -1379,6 +1402,7 @@ if __name__ == '__main__':
             "SM-PPM source loader: using labeled source-domain training split "
             f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
             f"ablation_mode={opt.smppm_ablation_mode}. "
+            f"plain_source_loader={opt.smppm_plain_source_loader}. "
             "Target labels are not used for adaptation."
         )
     elif smppm_source_free_proto:
@@ -1400,7 +1424,8 @@ if __name__ == '__main__':
         or smppm_requires_source_loader
     )
     if needs_train_loader:
-        train_loader = DataLoader(dataset = train_set, num_workers = opt.num_workers,\
+        train_loader_dataset = source_set_for_loader if smppm_requires_source_loader else train_set
+        train_loader = DataLoader(dataset = train_loader_dataset, num_workers = opt.num_workers,\
                 batch_size = source_train_batch_size, shuffle = True, drop_last = True, worker_init_fn = worker_init_fn, \
                 pin_memory = True, prefetch_factor = effective_prefetch_factor, persistent_workers=(opt.num_workers > 0))  # Keep workers alive across epochs.
     else:
@@ -1457,7 +1482,8 @@ if __name__ == '__main__':
                 f"source_free_tau={opt.smppm_source_free_tau}, "
                 f"source_free_entropy_threshold={opt.smppm_source_free_entropy_threshold}, "
                 f"source_free_entropy_weight={opt.smppm_source_free_entropy_weight}, "
-                f"source_free_lambda_proto={opt.smppm_source_free_lambda_proto}"
+                f"source_free_lambda_proto={opt.smppm_source_free_lambda_proto}, "
+                f"plain_source_loader={opt.smppm_plain_source_loader}"
             )
         elif opt.tta == 'gtta':
             print(

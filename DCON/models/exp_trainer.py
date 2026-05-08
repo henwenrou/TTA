@@ -431,7 +431,8 @@ class Train_process():
                 else:
                     self.configure_asm(source_loader)
             elif self.tta_mode == 'sm_ppm':
-                if source_loader is None:
+                smppm_mode = getattr(self.opt, 'smppm_ablation_mode', 'full')
+                if source_loader is None and smppm_mode != 'source_free_proto':
                     print("SM-PPM requested: call configure_smppm(source_loader) before te_func_smppm.")
                 else:
                     self.configure_smppm(source_loader)
@@ -672,12 +673,13 @@ class Train_process():
         logger.info(msg)
 
     def configure_smppm(self, source_loader=None):
+        ablation_mode = getattr(self.opt, 'smppm_ablation_mode', 'full')
         if source_loader is None:
             source_loader = self.smppm_source_loader
-        if source_loader is None:
+        if source_loader is None and ablation_mode != 'source_free_proto':
             raise RuntimeError(
-                "SM-PPM requires a labeled source-domain training loader. "
-                "It is source-dependent TTA, not source-free TTA."
+                f"SM-PPM ablation mode {ablation_mode} requires a labeled "
+                "source-domain training loader."
             )
 
         self.smppm_source_loader = source_loader
@@ -703,11 +705,17 @@ class Train_process():
             feature_size=getattr(self.opt, 'smppm_feature_size', 32),
             episodic=getattr(self.opt, 'smppm_episodic', False),
             segmentation_criterion=self.smppm_segmentation_loss,
+            ablation_mode=ablation_mode,
+            source_free_tau=getattr(self.opt, 'smppm_source_free_tau', 0.7),
+            source_free_entropy_threshold=getattr(self.opt, 'smppm_source_free_entropy_threshold', None),
+            source_free_lambda_proto=getattr(self.opt, 'smppm_source_free_lambda_proto', 1.0),
+            source_free_entropy_weight=getattr(self.opt, 'smppm_source_free_entropy_weight', 1.0),
         )
 
         msg = (
-            "SM-PPM enabled: source-dependent supervised TTA. "
-            "Target images provide feature prototypes only; target labels are used only for evaluation. "
+            "SM-PPM enabled. "
+            f"ablation_mode={ablation_mode}, "
+            "Target labels are used only for evaluation. "
             f"lr={getattr(self.opt, 'smppm_lr', 2.5e-4)}, "
             f"momentum={getattr(self.opt, 'smppm_momentum', 0.9)}, "
             f"wd={getattr(self.opt, 'smppm_wd', 5e-4)}, "
@@ -715,10 +723,17 @@ class Train_process():
             f"src_batch_size={getattr(self.opt, 'smppm_src_batch_size', 2)}, "
             f"patch_size={getattr(self.opt, 'smppm_patch_size', 8)}, "
             f"feature_size={getattr(self.opt, 'smppm_feature_size', 32)}, "
-            f"episodic={getattr(self.opt, 'smppm_episodic', False)}"
+            f"episodic={getattr(self.opt, 'smppm_episodic', False)}, "
+            f"source_free_tau={getattr(self.opt, 'smppm_source_free_tau', 0.7)}, "
+            "source_free_entropy_threshold="
+            f"{getattr(self.opt, 'smppm_source_free_entropy_threshold', None)}, "
+            f"source_free_entropy_weight={getattr(self.opt, 'smppm_source_free_entropy_weight', 1.0)}, "
+            f"source_free_lambda_proto={getattr(self.opt, 'smppm_source_free_lambda_proto', 1.0)}"
         )
         print(msg)
+        print(self.smppm_adapter.feature_summary())
         logger.info(msg)
+        logger.info(self.smppm_adapter.feature_summary())
 
     def configure_gtta(self, source_loader=None):
         if source_loader is None:

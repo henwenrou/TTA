@@ -387,6 +387,17 @@ def get_args():
                         help='Spatial size used before target feature patching for SM-PPM.')
     parser.add_argument('--smppm_episodic', type=str2bool, nargs='?', const=True, default=False,
                         help='Reset model and optimizer before each SM-PPM target batch.')
+    parser.add_argument('--smppm_ablation_mode', type=str, default='full',
+                        choices=['full', 'source_ce_only', 'sm_ce', 'ppm_ce', 'source_free_proto'],
+                        help='SM-PPM ablation mode. sm_ce is unavailable unless an explicit SM style-mixing implementation exists.')
+    parser.add_argument('--smppm_source_free_tau', type=float, default=0.7,
+                        help='Confidence threshold for source_free_proto reliable target pixels.')
+    parser.add_argument('--smppm_source_free_entropy_threshold', type=float, default=None,
+                        help='Optional normalized entropy threshold for source_free_proto reliable target pixels.')
+    parser.add_argument('--smppm_source_free_entropy_weight', type=float, default=1.0,
+                        help='Weight for source_free_proto masked entropy minimization.')
+    parser.add_argument('--smppm_source_free_lambda_proto', type=float, default=1.0,
+                        help='Weight for source_free_proto target prototype compactness.')
     parser.add_argument('--gtta_lr', type=float, default=2.5e-4,
                         help='Learning rate for GTTA supervised source and target pseudo-label updates.')
     parser.add_argument('--gtta_momentum', type=float, default=0.9,
@@ -700,6 +711,11 @@ def get_args():
 
     args = parser.parse_args()
 
+    if args.phase == 'test' and args.tta == 'sm_ppm':
+        mode_tag = f"smppm_{args.smppm_ablation_mode}"
+        if mode_tag not in args.expname:
+            args.expname = f"{mode_tag}_{args.expname}"
+
     # Validate RCCS parameters
     if hasattr(args, 'use_rccs') and args.use_rccs:
         # Validate p_rccs
@@ -788,6 +804,14 @@ def get_args():
         raise ValueError("smppm_feature_size must be >= smppm_patch_size")
     if args.smppm_feature_size % args.smppm_patch_size != 0:
         raise ValueError("smppm_feature_size must be divisible by smppm_patch_size")
+    if not (0.0 <= args.smppm_source_free_tau <= 1.0):
+        raise ValueError(f"Invalid smppm_source_free_tau={args.smppm_source_free_tau}. Must be in [0, 1]")
+    if args.smppm_source_free_entropy_threshold is not None and args.smppm_source_free_entropy_threshold < 0:
+        raise ValueError("smppm_source_free_entropy_threshold must be >= 0 when set")
+    if args.smppm_source_free_entropy_weight < 0:
+        raise ValueError("smppm_source_free_entropy_weight must be >= 0")
+    if args.smppm_source_free_lambda_proto < 0:
+        raise ValueError("smppm_source_free_lambda_proto must be >= 0")
     if args.gtta_lr <= 0:
         raise ValueError(f"Invalid gtta_lr={args.gtta_lr}. Must be > 0")
     if args.gtta_momentum < 0:
@@ -1115,7 +1139,8 @@ if __name__ == '__main__':
         logging.info("asm_episodic:"+str(opt.asm_episodic))
     elif opt.tta == 'sm_ppm':
         logging.info("=== SM-PPM Configuration ===")
-        logging.info("SM-PPM is source-dependent TTA: target images provide feature prototypes only; source labels supervise adaptation.")
+        logging.info("[SM-PPM Ablation Mode] "+str(opt.smppm_ablation_mode))
+        logging.info("Current DCON tta_smppm.py has no explicit SM style-mixing implementation; sm_ce is unavailable.")
         logging.info("smppm_lr:"+str(opt.smppm_lr))
         logging.info("smppm_momentum:"+str(opt.smppm_momentum))
         logging.info("smppm_wd:"+str(opt.smppm_wd))
@@ -1124,6 +1149,10 @@ if __name__ == '__main__':
         logging.info("smppm_patch_size:"+str(opt.smppm_patch_size))
         logging.info("smppm_feature_size:"+str(opt.smppm_feature_size))
         logging.info("smppm_episodic:"+str(opt.smppm_episodic))
+        logging.info("smppm_source_free_tau:"+str(opt.smppm_source_free_tau))
+        logging.info("smppm_source_free_entropy_threshold:"+str(opt.smppm_source_free_entropy_threshold))
+        logging.info("smppm_source_free_entropy_weight:"+str(opt.smppm_source_free_entropy_weight))
+        logging.info("smppm_source_free_lambda_proto:"+str(opt.smppm_source_free_lambda_proto))
     elif opt.tta == 'gtta':
         logging.info("=== GTTA Configuration ===")
         logging.info("GTTA is source-dependent TTA: source labels supervise adaptation; target labels are evaluation-only.")
@@ -1325,6 +1354,17 @@ if __name__ == '__main__':
         print(f"   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation")
         effective_prefetch_factor = 2
 
+    smppm_requires_source_loader = (
+        opt.phase == 'test'
+        and opt.tta == 'sm_ppm'
+        and opt.smppm_ablation_mode != 'source_free_proto'
+    )
+    smppm_source_free_proto = (
+        opt.phase == 'test'
+        and opt.tta == 'sm_ppm'
+        and opt.smppm_ablation_mode == 'source_free_proto'
+    )
+
     source_train_batch_size = opt.batchSize
     if opt.phase == 'test' and opt.tta == 'asm':
         source_train_batch_size = opt.asm_src_batch_size
@@ -1333,12 +1373,18 @@ if __name__ == '__main__':
             f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
             "Target labels are not used for adaptation."
         )
-    elif opt.phase == 'test' and opt.tta == 'sm_ppm':
+    elif smppm_requires_source_loader:
         source_train_batch_size = opt.smppm_src_batch_size
         print(
             "SM-PPM source loader: using labeled source-domain training split "
             f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
+            f"ablation_mode={opt.smppm_ablation_mode}. "
             "Target labels are not used for adaptation."
+        )
+    elif smppm_source_free_proto:
+        print(
+            "SM-PPM source_free_proto: no source_loader will be passed to the "
+            "adapter; no source labels are used for adaptation."
         )
     elif opt.phase == 'test' and opt.tta == 'gtta':
         source_train_batch_size = opt.gtta_src_batch_size
@@ -1348,9 +1394,17 @@ if __name__ == '__main__':
             "Target labels are not used for adaptation."
         )
 
-    train_loader = DataLoader(dataset = train_set, num_workers = opt.num_workers,\
-            batch_size = source_train_batch_size, shuffle = True, drop_last = True, worker_init_fn = worker_init_fn, \
-            pin_memory = True, prefetch_factor = effective_prefetch_factor, persistent_workers=(opt.num_workers > 0))  # Keep workers alive across epochs.
+    needs_train_loader = (
+        opt.phase != 'test'
+        or opt.tta in ['asm', 'gtta']
+        or smppm_requires_source_loader
+    )
+    if needs_train_loader:
+        train_loader = DataLoader(dataset = train_set, num_workers = opt.num_workers,\
+                batch_size = source_train_batch_size, shuffle = True, drop_last = True, worker_init_fn = worker_init_fn, \
+                pin_memory = True, prefetch_factor = effective_prefetch_factor, persistent_workers=(opt.num_workers > 0))  # Keep workers alive across epochs.
+    else:
+        train_loader = None
     trval_loader=DataLoader(dataset = tr_valset, num_workers = opt.num_workers,batch_size = 1, shuffle = False, pin_memory = True, prefetch_factor = effective_prefetch_factor)
     trte_loader=DataLoader(dataset = tr_teset, num_workers = opt.num_workers,batch_size = 1, shuffle = False, pin_memory = True, prefetch_factor = effective_prefetch_factor)
     test_loader = DataLoader(dataset = test_set, num_workers = opt.num_workers,batch_size = 1, shuffle = False, pin_memory = True, prefetch_factor = effective_prefetch_factor)
@@ -1393,12 +1447,17 @@ if __name__ == '__main__':
             )
         elif opt.tta == 'sm_ppm':
             print(
-                "SM-PPM config: source-dependent supervised TTA; "
-                "target images provide feature prototypes only, target labels are evaluation-only. "
+                "SM-PPM config: "
+                f"ablation_mode={opt.smppm_ablation_mode}, "
+                "target labels are evaluation-only. "
                 f"lr={opt.smppm_lr}, momentum={opt.smppm_momentum}, wd={opt.smppm_wd}, "
                 f"steps={opt.smppm_steps}, src_batch_size={opt.smppm_src_batch_size}, "
                 f"patch_size={opt.smppm_patch_size}, feature_size={opt.smppm_feature_size}, "
-                f"episodic={opt.smppm_episodic}"
+                f"episodic={opt.smppm_episodic}, "
+                f"source_free_tau={opt.smppm_source_free_tau}, "
+                f"source_free_entropy_threshold={opt.smppm_source_free_entropy_threshold}, "
+                f"source_free_entropy_weight={opt.smppm_source_free_entropy_weight}, "
+                f"source_free_lambda_proto={opt.smppm_source_free_lambda_proto}"
             )
         elif opt.tta == 'gtta':
             print(
@@ -1497,7 +1556,9 @@ if __name__ == '__main__':
             raise FileNotFoundError(f"Checkpoint not found: {reload_model_fid}")
 
         # Instantiate trainer
-        source_dependent_loader = train_loader if opt.tta in ['asm', 'sm_ppm', 'gtta'] else None
+        source_dependent_loader = train_loader if (
+            opt.tta in ['asm', 'gtta'] or smppm_requires_source_loader
+        ) else None
         model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=source_dependent_loader)
 
         with torch.no_grad():

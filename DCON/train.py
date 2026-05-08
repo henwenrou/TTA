@@ -389,7 +389,7 @@ def get_args():
                         help='Reset model and optimizer before each SM-PPM target batch.')
     parser.add_argument('--smppm_ablation_mode', type=str, default='full',
                         choices=['full', 'source_ce_only', 'sm_ce', 'ppm_ce', 'source_free_proto'],
-                        help='SM-PPM ablation mode. sm_ce is unavailable unless an explicit SM style-mixing implementation exists.')
+                        help='SM-PPM ablation mode. full uses SM+PPM, sm_ce uses SM without PPM.')
     parser.add_argument('--smppm_source_free_tau', type=float, default=0.7,
                         help='Confidence threshold for source_free_proto reliable target pixels.')
     parser.add_argument('--smppm_source_free_entropy_threshold', type=float, default=None,
@@ -400,6 +400,8 @@ def get_args():
                         help='Weight for source_free_proto target prototype compactness.')
     parser.add_argument('--smppm_plain_source_loader', type=str2bool, nargs='?', const=True, default=True,
                         help='Use non-augmented source-train slices for SM-PPM source CE ablations during test.')
+    parser.add_argument('--smppm_style_alpha', type=float, default=1.0,
+                        help='Blend weight for SM-PPM tensor-space AdaIN style mixing; 1 uses full target statistics.')
     parser.add_argument('--smppm_log_interval', type=int, default=0,
                         help='Log SM-PPM per-batch loss every N target batches; 0 disables per-batch loss logs.')
     parser.add_argument('--gtta_lr', type=float, default=2.5e-4,
@@ -818,6 +820,8 @@ def get_args():
         raise ValueError("smppm_source_free_entropy_weight must be >= 0")
     if args.smppm_source_free_lambda_proto < 0:
         raise ValueError("smppm_source_free_lambda_proto must be >= 0")
+    if not (0.0 <= args.smppm_style_alpha <= 1.0):
+        raise ValueError("smppm_style_alpha must be in [0, 1]")
     if args.smppm_log_interval < 0:
         raise ValueError("smppm_log_interval must be >= 0")
     if args.gtta_lr <= 0:
@@ -1153,7 +1157,7 @@ if __name__ == '__main__':
     elif opt.tta == 'sm_ppm':
         logging.info("=== SM-PPM Configuration ===")
         logging.info("[SM-PPM Ablation Mode] "+str(opt.smppm_ablation_mode))
-        logging.info("Current DCON tta_smppm.py has no explicit SM style-mixing implementation; sm_ce is unavailable.")
+        logging.info("SM style mixing backend: tensor-space AdaIN from target image statistics onto source images.")
         logging.info("smppm_lr:"+str(opt.smppm_lr))
         logging.info("smppm_momentum:"+str(opt.smppm_momentum))
         logging.info("smppm_wd:"+str(opt.smppm_wd))
@@ -1167,6 +1171,7 @@ if __name__ == '__main__':
         logging.info("smppm_source_free_entropy_weight:"+str(opt.smppm_source_free_entropy_weight))
         logging.info("smppm_source_free_lambda_proto:"+str(opt.smppm_source_free_lambda_proto))
         logging.info("smppm_plain_source_loader:"+str(opt.smppm_plain_source_loader))
+        logging.info("smppm_style_alpha:"+str(opt.smppm_style_alpha))
         logging.info("smppm_log_interval:"+str(opt.smppm_log_interval))
     elif opt.tta == 'gtta':
         logging.info("=== GTTA Configuration ===")
@@ -1512,6 +1517,7 @@ if __name__ == '__main__':
                 f"source_free_entropy_weight={opt.smppm_source_free_entropy_weight}, "
                 f"source_free_lambda_proto={opt.smppm_source_free_lambda_proto}, "
                 f"plain_source_loader={opt.smppm_plain_source_loader}, "
+                f"style_alpha={opt.smppm_style_alpha}, "
                 f"log_interval={opt.smppm_log_interval}"
             )
         elif opt.tta == 'gtta':

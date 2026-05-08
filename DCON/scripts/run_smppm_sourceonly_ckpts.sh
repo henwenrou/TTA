@@ -1,8 +1,8 @@
 #!/bin/bash
 # Run SM-PPM on DCON source-only checkpoints.
 #
-# full/source_ce_only/ppm_ce are source-dependent ablations. source_free_proto
-# passes no source loader to the adapter.
+# full/source_ce_only/sm_ce/ppm_ce are source-dependent ablations.
+# source_free_proto passes no source loader to the adapter.
 
 set -e
 
@@ -38,11 +38,12 @@ SMPPM_SOURCE_FREE_ENTROPY_THRESHOLD=${SMPPM_SOURCE_FREE_ENTROPY_THRESHOLD:-}
 SMPPM_SOURCE_FREE_ENTROPY_WEIGHT=${SMPPM_SOURCE_FREE_ENTROPY_WEIGHT:-1.0}
 SMPPM_SOURCE_FREE_LAMBDA_PROTO=${SMPPM_SOURCE_FREE_LAMBDA_PROTO:-1.0}
 SMPPM_PLAIN_SOURCE_LOADER=${SMPPM_PLAIN_SOURCE_LOADER:-true}
+SMPPM_STYLE_ALPHA=${SMPPM_STYLE_ALPHA:-1.0}
 SMPPM_LOG_INTERVAL=${SMPPM_LOG_INTERVAL:-0}
 
 SMPPM_ABLATION_MODE=${SMPPM_ABLATION_MODE:-full}
 if [ "${SMPPM_ABLATION_MODE}" = "all" ]; then
-  SMPPM_ABLATION_MODES=(full source_ce_only ppm_ce source_free_proto)
+  SMPPM_ABLATION_MODES=(full source_ce_only sm_ce ppm_ce source_free_proto)
 else
   read -r -a SMPPM_ABLATION_MODES <<< "${SMPPM_ABLATION_MODE}"
 fi
@@ -58,11 +59,7 @@ run_smppm() {
   local expname="smppm_${ablation_mode}_${expname_base}"
 
   case "${ablation_mode}" in
-    full|source_ce_only|ppm_ce|source_free_proto) ;;
-    sm_ce)
-      echo "Skipping sm_ce: current DCON tta_smppm.py has no explicit SM style-mixing implementation."
-      return 0
-      ;;
+    full|source_ce_only|sm_ce|ppm_ce|source_free_proto) ;;
     *)
       echo "Unknown SMPPM_ABLATION_MODE: ${ablation_mode}" >&2
       return 2
@@ -108,6 +105,7 @@ run_smppm() {
     --smppm_source_free_entropy_weight "${SMPPM_SOURCE_FREE_ENTROPY_WEIGHT}" \
     --smppm_source_free_lambda_proto "${SMPPM_SOURCE_FREE_LAMBDA_PROTO}" \
     --smppm_plain_source_loader "${SMPPM_PLAIN_SOURCE_LOADER}" \
+    --smppm_style_alpha "${SMPPM_STYLE_ALPHA}" \
     --smppm_log_interval "${SMPPM_LOG_INTERVAL}" \
     --use_cgsd 0 \
     --use_projector 0 \

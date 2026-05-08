@@ -67,6 +67,7 @@ class SMPPMAdapter:
         source_free_entropy_threshold=None,
         source_free_lambda_proto=1.0,
         source_free_entropy_weight=1.0,
+        log_interval=0,
     ):
         self.model = model
         self.optimizer = optimizer
@@ -116,6 +117,7 @@ class SMPPMAdapter:
             self.source_free_entropy_threshold = float(self.source_free_entropy_threshold)
         self.source_free_lambda_proto = float(source_free_lambda_proto)
         self.source_free_entropy_weight = float(source_free_entropy_weight)
+        self.log_interval = int(log_interval)
         self.model_state = deepcopy(model.state_dict()) if self.episodic else None
         self.optimizer_state = deepcopy(optimizer.state_dict()) if self.episodic else None
         self.last_losses = {}
@@ -149,6 +151,8 @@ class SMPPMAdapter:
             raise ValueError(
                 f"source_free_entropy_weight must be >= 0, got {self.source_free_entropy_weight}."
             )
+        if self.log_interval < 0:
+            raise ValueError(f"log_interval must be >= 0, got {self.log_interval}.")
 
         logger.info(
             "[SM-PPM Ablation Mode] %s", self.ablation_mode
@@ -199,9 +203,13 @@ class SMPPMAdapter:
             f"  steps_per_target_batch={self.steps}\n"
             f"  source_loss="
             f"{'ce_only' if self.ablation_mode in {'source_ce_only', 'ppm_ce'} else ('target_entropy_plus_proto_compact' if self.uses_target_only_loss else 'original_dcon_segmentation_criterion')}\n"
+            f"  log_interval={self.log_interval}\n"
             f"  sm_unavailable_reason="
             f"{'current DCON tta_smppm.py has no explicit SM style-mixing implementation' if not STYLE_MIXING_AVAILABLE else 'available'}"
         )
+
+    def _should_log_batch(self, batch_index):
+        return self.log_interval > 0 and batch_index % self.log_interval == 0
 
     def reset(self):
         if self.model_state is None or self.optimizer_state is None:
@@ -429,25 +437,26 @@ class SMPPMAdapter:
             source_img = source_img.to(self.device, non_blocking=True).float()
             source_label = source_label.to(self.device, non_blocking=True).long()
             step_stats = self._adapt_one_source_batch(source_img, source_label, prototypes)
-            logger.info(
-                "smppm_mode=%s target_batch=%d step=%d/%d "
-                "loss_total=%.6f loss_source=%.6f loss_entropy=0.000000 "
-                "loss_proto=0.000000 weight_mean=%.6f weight_max=%.6f "
-                "source_loader=%s source_label=%s SM=%s PPM=%s target_only_loss=%s",
-                self.ablation_mode,
-                self.num_forwards + 1,
-                step_idx + 1,
-                self.steps,
-                float(step_stats["loss"].detach().item()),
-                float(step_stats["loss"].detach().item()),
-                float(step_stats["pixel_weight"].detach().mean().item()),
-                float(step_stats["pixel_weight"].detach().max().item()),
-                self.uses_source_loader,
-                self.uses_source_label,
-                self.uses_sm,
-                self.uses_ppm,
-                self.uses_target_only_loss,
-            )
+            if self._should_log_batch(self.num_forwards + 1):
+                logger.info(
+                    "smppm_mode=%s target_batch=%d step=%d/%d "
+                    "loss_total=%.6f loss_source=%.6f loss_entropy=0.000000 "
+                    "loss_proto=0.000000 weight_mean=%.6f weight_max=%.6f "
+                    "source_loader=%s source_label=%s SM=%s PPM=%s target_only_loss=%s",
+                    self.ablation_mode,
+                    self.num_forwards + 1,
+                    step_idx + 1,
+                    self.steps,
+                    float(step_stats["loss"].detach().item()),
+                    float(step_stats["loss"].detach().item()),
+                    float(step_stats["pixel_weight"].detach().mean().item()),
+                    float(step_stats["pixel_weight"].detach().max().item()),
+                    self.uses_source_loader,
+                    self.uses_source_label,
+                    self.uses_sm,
+                    self.uses_ppm,
+                    self.uses_target_only_loss,
+                )
 
         self.model.eval()
         with torch.no_grad():
@@ -469,15 +478,16 @@ class SMPPMAdapter:
                 "smppm_use_ppm": float(self.uses_ppm),
                 "smppm_use_target_only_loss": float(self.uses_target_only_loss),
             }
-            logger.info(
-                "smppm_mode=%s smppm_loss_total=%.6f smppm_loss_source=%.6f "
-                "smppm_weight_mean=%.6f smppm_weight_max=%.6f",
-                self.ablation_mode,
-                self.last_losses["smppm_loss_total"],
-                self.last_losses["smppm_loss_source"],
-                self.last_losses["smppm_weight_mean"],
-                self.last_losses["smppm_weight_max"],
-            )
+            if self._should_log_batch(self.num_forwards):
+                logger.info(
+                    "smppm_mode=%s smppm_loss_total=%.6f smppm_loss_source=%.6f "
+                    "smppm_weight_mean=%.6f smppm_weight_max=%.6f",
+                    self.ablation_mode,
+                    self.last_losses["smppm_loss_total"],
+                    self.last_losses["smppm_loss_source"],
+                    self.last_losses["smppm_weight_mean"],
+                    self.last_losses["smppm_weight_max"],
+                )
 
         return logits
 
@@ -492,29 +502,30 @@ class SMPPMAdapter:
         step_stats = None
         for step_idx in range(self.steps):
             step_stats = self._adapt_one_target_batch(target_img)
-            logger.info(
-                "smppm_mode=%s target_batch=%d step=%d/%d "
-                "loss_total=%.6f loss_source=0.000000 loss_entropy=%.6f "
-                "loss_proto=%.6f reliable_fraction=%.6f reliable_pixels=%.1f "
-                "proto_classes=%.1f proto_pixels=%.1f source_loader=%s "
-                "source_label=%s SM=%s PPM=%s target_only_loss=%s",
-                self.ablation_mode,
-                self.num_forwards + 1,
-                step_idx + 1,
-                self.steps,
-                float(step_stats["loss"].detach().item()),
-                float(step_stats["entropy"].detach().item()),
-                float(step_stats["proto"].detach().item()),
-                float(step_stats["reliable_fraction"].detach().item()),
-                float(step_stats["reliable_pixels"].detach().item()),
-                float(step_stats["proto_classes"].detach().item()),
-                float(step_stats["proto_pixels"].detach().item()),
-                self.uses_source_loader,
-                self.uses_source_label,
-                self.uses_sm,
-                self.uses_ppm,
-                self.uses_target_only_loss,
-            )
+            if self._should_log_batch(self.num_forwards + 1):
+                logger.info(
+                    "smppm_mode=%s target_batch=%d step=%d/%d "
+                    "loss_total=%.6f loss_source=0.000000 loss_entropy=%.6f "
+                    "loss_proto=%.6f reliable_fraction=%.6f reliable_pixels=%.1f "
+                    "proto_classes=%.1f proto_pixels=%.1f source_loader=%s "
+                    "source_label=%s SM=%s PPM=%s target_only_loss=%s",
+                    self.ablation_mode,
+                    self.num_forwards + 1,
+                    step_idx + 1,
+                    self.steps,
+                    float(step_stats["loss"].detach().item()),
+                    float(step_stats["entropy"].detach().item()),
+                    float(step_stats["proto"].detach().item()),
+                    float(step_stats["reliable_fraction"].detach().item()),
+                    float(step_stats["reliable_pixels"].detach().item()),
+                    float(step_stats["proto_classes"].detach().item()),
+                    float(step_stats["proto_pixels"].detach().item()),
+                    self.uses_source_loader,
+                    self.uses_source_label,
+                    self.uses_sm,
+                    self.uses_ppm,
+                    self.uses_target_only_loss,
+                )
 
         self.model.eval()
         with torch.no_grad():
@@ -540,15 +551,16 @@ class SMPPMAdapter:
                 "smppm_use_ppm": float(self.uses_ppm),
                 "smppm_use_target_only_loss": float(self.uses_target_only_loss),
             }
-            logger.info(
-                "smppm_mode=%s smppm_loss_total=%.6f smppm_loss_entropy=%.6f "
-                "smppm_loss_proto=%.6f smppm_reliable_fraction=%.6f",
-                self.ablation_mode,
-                self.last_losses["smppm_loss_total"],
-                self.last_losses["smppm_loss_entropy"],
-                self.last_losses["smppm_loss_proto"],
-                self.last_losses["smppm_reliable_fraction"],
-            )
+            if self._should_log_batch(self.num_forwards):
+                logger.info(
+                    "smppm_mode=%s smppm_loss_total=%.6f smppm_loss_entropy=%.6f "
+                    "smppm_loss_proto=%.6f smppm_reliable_fraction=%.6f",
+                    self.ablation_mode,
+                    self.last_losses["smppm_loss_total"],
+                    self.last_losses["smppm_loss_entropy"],
+                    self.last_losses["smppm_loss_proto"],
+                    self.last_losses["smppm_reliable_fraction"],
+                )
 
         return logits
 

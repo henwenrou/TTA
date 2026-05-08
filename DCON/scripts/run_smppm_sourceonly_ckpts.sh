@@ -23,6 +23,7 @@ fi
 RESULTS_DIR=${RESULTS_DIR:-results}
 SAVE_PREDICTION=${SAVE_PREDICTION:-false}
 EVAL_SOURCE_DOMAIN=${EVAL_SOURCE_DOMAIN:-false}
+QUIET_CONSOLE=${QUIET_CONSOLE:-true}
 
 SMPPM_LR=${SMPPM_LR:-2.5e-4}
 SMPPM_MOMENTUM=${SMPPM_MOMENTUM:-0.9}
@@ -37,6 +38,7 @@ SMPPM_SOURCE_FREE_ENTROPY_THRESHOLD=${SMPPM_SOURCE_FREE_ENTROPY_THRESHOLD:-}
 SMPPM_SOURCE_FREE_ENTROPY_WEIGHT=${SMPPM_SOURCE_FREE_ENTROPY_WEIGHT:-1.0}
 SMPPM_SOURCE_FREE_LAMBDA_PROTO=${SMPPM_SOURCE_FREE_LAMBDA_PROTO:-1.0}
 SMPPM_PLAIN_SOURCE_LOADER=${SMPPM_PLAIN_SOURCE_LOADER:-true}
+SMPPM_LOG_INTERVAL=${SMPPM_LOG_INTERVAL:-0}
 
 SMPPM_ABLATION_MODE=${SMPPM_ABLATION_MODE:-full}
 if [ "${SMPPM_ABLATION_MODE}" = "all" ]; then
@@ -90,6 +92,7 @@ run_smppm() {
     --prefetch_factor "${PREFETCH_FACTOR}" \
     --save_prediction "${SAVE_PREDICTION}" \
     --eval_source_domain "${EVAL_SOURCE_DOMAIN}" \
+    --quiet_console "${QUIET_CONSOLE}" \
     --tta sm_ppm \
     --smppm_lr "${SMPPM_LR}" \
     --smppm_momentum "${SMPPM_MOMENTUM}" \
@@ -105,6 +108,7 @@ run_smppm() {
     --smppm_source_free_entropy_weight "${SMPPM_SOURCE_FREE_ENTROPY_WEIGHT}" \
     --smppm_source_free_lambda_proto "${SMPPM_SOURCE_FREE_LAMBDA_PROTO}" \
     --smppm_plain_source_loader "${SMPPM_PLAIN_SOURCE_LOADER}" \
+    --smppm_log_interval "${SMPPM_LOG_INTERVAL}" \
     --use_cgsd 0 \
     --use_projector 0 \
     --use_saam 0 \

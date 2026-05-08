@@ -710,6 +710,7 @@ class Train_process():
             source_free_entropy_threshold=getattr(self.opt, 'smppm_source_free_entropy_threshold', None),
             source_free_lambda_proto=getattr(self.opt, 'smppm_source_free_lambda_proto', 1.0),
             source_free_entropy_weight=getattr(self.opt, 'smppm_source_free_entropy_weight', 1.0),
+            log_interval=getattr(self.opt, 'smppm_log_interval', 0),
         )
 
         msg = (
@@ -728,10 +729,12 @@ class Train_process():
             "source_free_entropy_threshold="
             f"{getattr(self.opt, 'smppm_source_free_entropy_threshold', None)}, "
             f"source_free_entropy_weight={getattr(self.opt, 'smppm_source_free_entropy_weight', 1.0)}, "
-            f"source_free_lambda_proto={getattr(self.opt, 'smppm_source_free_lambda_proto', 1.0)}"
+            f"source_free_lambda_proto={getattr(self.opt, 'smppm_source_free_lambda_proto', 1.0)}, "
+            f"log_interval={getattr(self.opt, 'smppm_log_interval', 0)}"
         )
-        print(msg)
-        print(self.smppm_adapter.feature_summary())
+        if not getattr(self.opt, 'quiet_console', False):
+            print(msg)
+            print(self.smppm_adapter.feature_summary())
         logger.info(msg)
         logger.info(self.smppm_adapter.feature_summary())
 

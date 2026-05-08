@@ -400,6 +400,8 @@ def get_args():
                         help='Weight for source_free_proto target prototype compactness.')
     parser.add_argument('--smppm_plain_source_loader', type=str2bool, nargs='?', const=True, default=True,
                         help='Use non-augmented source-train slices for SM-PPM source CE ablations during test.')
+    parser.add_argument('--smppm_log_interval', type=int, default=0,
+                        help='Log SM-PPM per-batch loss every N target batches; 0 disables per-batch loss logs.')
     parser.add_argument('--gtta_lr', type=float, default=2.5e-4,
                         help='Learning rate for GTTA supervised source and target pseudo-label updates.')
     parser.add_argument('--gtta_momentum', type=float, default=0.9,
@@ -632,6 +634,8 @@ def get_args():
     # DataLoader parameters
     parser.add_argument('--num_workers', type=int, default=16, help='Number of workers for data loading')
     parser.add_argument('--prefetch_factor', type=int, default=4, help='Number of batches to prefetch per worker')
+    parser.add_argument('--quiet_console', type=str2bool, nargs='?', const=True, default=False,
+                        help='Write logging.info output only to log.txt, leaving console mostly to tqdm and final metrics.')
 
     # Paper mainline: CGSD is an independent switch.
     parser.add_argument('--use_cgsd', type=int, default=1,
@@ -814,6 +818,8 @@ def get_args():
         raise ValueError("smppm_source_free_entropy_weight must be >= 0")
     if args.smppm_source_free_lambda_proto < 0:
         raise ValueError("smppm_source_free_lambda_proto must be >= 0")
+    if args.smppm_log_interval < 0:
+        raise ValueError("smppm_log_interval must be >= 0")
     if args.gtta_lr <= 0:
         raise ValueError(f"Invalid gtta_lr={args.gtta_lr}. Must be > 0")
     if args.gtta_momentum < 0:
@@ -1064,6 +1070,11 @@ if __name__ == '__main__':
     logger = logging.getLogger('log1')
     logging.basicConfig(filemode='a', level=logging.INFO,format='[%(asctime)s.%(msecs)03d] %(message)s', datefmt='%H:%M:%S')
     logging.getLogger().addHandler(logging.FileHandler(os.path.join(exp_dir, 'log.txt'), encoding='utf-8'))
+    if opt.quiet_console:
+        root_logger = logging.getLogger()
+        for handler in list(root_logger.handlers):
+            if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+                root_logger.removeHandler(handler)
     logging.info("config:"+str(opt))
     logging.info("name:"+opt.expname)
     logging.info("use_cgsd:"+str(opt.use_cgsd))
@@ -1156,6 +1167,7 @@ if __name__ == '__main__':
         logging.info("smppm_source_free_entropy_weight:"+str(opt.smppm_source_free_entropy_weight))
         logging.info("smppm_source_free_lambda_proto:"+str(opt.smppm_source_free_lambda_proto))
         logging.info("smppm_plain_source_loader:"+str(opt.smppm_plain_source_loader))
+        logging.info("smppm_log_interval:"+str(opt.smppm_log_interval))
     elif opt.tta == 'gtta':
         logging.info("=== GTTA Configuration ===")
         logging.info("GTTA is source-dependent TTA: source labels supervise adaptation; target labels are evaluation-only.")
@@ -1499,7 +1511,8 @@ if __name__ == '__main__':
                 f"source_free_entropy_threshold={opt.smppm_source_free_entropy_threshold}, "
                 f"source_free_entropy_weight={opt.smppm_source_free_entropy_weight}, "
                 f"source_free_lambda_proto={opt.smppm_source_free_lambda_proto}, "
-                f"plain_source_loader={opt.smppm_plain_source_loader}"
+                f"plain_source_loader={opt.smppm_plain_source_loader}, "
+                f"log_interval={opt.smppm_log_interval}"
             )
         elif opt.tta == 'gtta':
             print(

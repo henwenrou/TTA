@@ -4,6 +4,7 @@
 # Examples:
 #   bash scripts/run_medseg_tta_dcon.sh
 #   METHODS="tent dg_tta gold a3_tta" bash scripts/run_medseg_tta_dcon.sh
+#   METHODS="tent tent_source_ce sar sar_source_ce cotta cotta_source_ce source_ce_only sm_ppm" bash scripts/run_medseg_tta_dcon.sh
 #   PYTHON_BIN=/path/to/env/bin/python SAA_DATA_ROOT=/path/to/data bash scripts/run_medseg_tta_dcon.sh
 
 set -euo pipefail
@@ -45,6 +46,12 @@ BN_ALPHA="${BN_ALPHA:-0.1}"
 TENT_LR="${TENT_LR:-1e-4}"
 TENT_STEPS="${TENT_STEPS:-1}"
 
+SAR_LR="${SAR_LR:-1e-4}"
+SAR_STEPS="${SAR_STEPS:-1}"
+SAR_RHO="${SAR_RHO:-0.05}"
+
+LAMBDA_SOURCE="${LAMBDA_SOURCE:-1.0}"
+
 DGTTA_LR="${DGTTA_LR:-1e-4}"
 DGTTA_STEPS="${DGTTA_STEPS:-1}"
 DGTTA_TRANSFORM_STRENGTH="${DGTTA_TRANSFORM_STRENGTH:-1.0}"
@@ -82,6 +89,13 @@ SMPPM_SRC_BATCH_SIZE="${SMPPM_SRC_BATCH_SIZE:-2}"
 SMPPM_PATCH_SIZE="${SMPPM_PATCH_SIZE:-8}"
 SMPPM_FEATURE_SIZE="${SMPPM_FEATURE_SIZE:-32}"
 SMPPM_EPISODIC="${SMPPM_EPISODIC:-false}"
+SMPPM_ABLATION_MODE="${SMPPM_ABLATION_MODE:-full}"
+SMPPM_SOURCE_FREE_TAU="${SMPPM_SOURCE_FREE_TAU:-0.7}"
+SMPPM_SOURCE_FREE_ENTROPY_WEIGHT="${SMPPM_SOURCE_FREE_ENTROPY_WEIGHT:-1.0}"
+SMPPM_SOURCE_FREE_LAMBDA_PROTO="${SMPPM_SOURCE_FREE_LAMBDA_PROTO:-1.0}"
+SMPPM_PLAIN_SOURCE_LOADER="${SMPPM_PLAIN_SOURCE_LOADER:-true}"
+SMPPM_STYLE_ALPHA="${SMPPM_STYLE_ALPHA:-1.0}"
+SMPPM_LOG_INTERVAL="${SMPPM_LOG_INTERVAL:-0}"
 
 GTTA_LR="${GTTA_LR:-2.5e-4}"
 GTTA_MOMENTUM="${GTTA_MOMENTUM:-0.9}"
@@ -190,6 +204,7 @@ require_ckpt() {
 
 method_args() {
   local method="$1"
+  METHOD_TTA="${method}"
   case "${method}" in
     none|norm_test|norm_ema)
       ;;
@@ -198,6 +213,28 @@ method_args() {
       ;;
     tent)
       METHOD_EXTRA=(--tent_lr "${TENT_LR}" --tent_steps "${TENT_STEPS}")
+      ;;
+    tent_source_ce)
+      METHOD_TTA="tent"
+      METHOD_EXTRA=(
+        --tent_lr "${TENT_LR}"
+        --tent_steps "${TENT_STEPS}"
+        --source_access true
+        --lambda_source "${LAMBDA_SOURCE}"
+      )
+      ;;
+    sar)
+      METHOD_EXTRA=(--sar_lr "${SAR_LR}" --sar_steps "${SAR_STEPS}" --sar_rho "${SAR_RHO}")
+      ;;
+    sar_source_ce)
+      METHOD_TTA="sar"
+      METHOD_EXTRA=(
+        --sar_lr "${SAR_LR}"
+        --sar_steps "${SAR_STEPS}"
+        --sar_rho "${SAR_RHO}"
+        --source_access true
+        --lambda_source "${LAMBDA_SOURCE}"
+      )
       ;;
     dg_tta)
       METHOD_EXTRA=(
@@ -216,6 +253,18 @@ method_args() {
         --cotta_mt "${COTTA_MT}"
         --cotta_rst "${COTTA_RST}"
         --cotta_ap "${COTTA_AP}"
+      )
+      ;;
+    cotta_source_ce)
+      METHOD_TTA="cotta"
+      METHOD_EXTRA=(
+        --cotta_lr "${COTTA_LR}"
+        --cotta_steps "${COTTA_STEPS}"
+        --cotta_mt "${COTTA_MT}"
+        --cotta_rst "${COTTA_RST}"
+        --cotta_ap "${COTTA_AP}"
+        --source_access true
+        --lambda_source "${LAMBDA_SOURCE}"
       )
       ;;
     memo)
@@ -250,6 +299,28 @@ method_args() {
         --smppm_patch_size "${SMPPM_PATCH_SIZE}"
         --smppm_feature_size "${SMPPM_FEATURE_SIZE}"
         --smppm_episodic "${SMPPM_EPISODIC}"
+        --smppm_ablation_mode "${SMPPM_ABLATION_MODE}"
+        --smppm_source_free_tau "${SMPPM_SOURCE_FREE_TAU}"
+        --smppm_source_free_entropy_weight "${SMPPM_SOURCE_FREE_ENTROPY_WEIGHT}"
+        --smppm_source_free_lambda_proto "${SMPPM_SOURCE_FREE_LAMBDA_PROTO}"
+        --smppm_plain_source_loader "${SMPPM_PLAIN_SOURCE_LOADER}"
+        --smppm_style_alpha "${SMPPM_STYLE_ALPHA}"
+        --smppm_log_interval "${SMPPM_LOG_INTERVAL}"
+      )
+      ;;
+    source_ce_only)
+      METHOD_EXTRA=(
+        --smppm_lr "${SMPPM_LR}"
+        --smppm_momentum "${SMPPM_MOMENTUM}"
+        --smppm_wd "${SMPPM_WD}"
+        --smppm_steps "${SMPPM_STEPS}"
+        --smppm_src_batch_size "${SMPPM_SRC_BATCH_SIZE}"
+        --smppm_patch_size "${SMPPM_PATCH_SIZE}"
+        --smppm_feature_size "${SMPPM_FEATURE_SIZE}"
+        --smppm_episodic "${SMPPM_EPISODIC}"
+        --smppm_ablation_mode source_ce_only
+        --smppm_plain_source_loader "${SMPPM_PLAIN_SOURCE_LOADER}"
+        --smppm_log_interval "${SMPPM_LOG_INTERVAL}"
       )
       ;;
     gtta)
@@ -399,7 +470,7 @@ run_one() {
     --num_workers "${NUM_WORKERS}"
     --save_prediction "${SAVE_PREDICTION}"
     --eval_source_domain "${EVAL_SOURCE_DOMAIN}"
-    --tta "${method}"
+    --tta "${METHOD_TTA}"
     --use_cgsd 0
     --use_projector 0
     --use_saam 0

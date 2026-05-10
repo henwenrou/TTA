@@ -2,10 +2,7 @@
 # Run all available SM-PPM ablations on DCON source-only checkpoints.
 #
 # Available modes in the current DCON implementation:
-#   full, source_ce_only, ppm_ce, source_free_proto
-#
-# sm_ce is intentionally excluded because DCON/models/tta_smppm.py does not
-# contain an explicit SM style-mixing implementation.
+#   full, source_ce_only, sm_ce, ppm_ce, source_free_proto
 
 set -e
 

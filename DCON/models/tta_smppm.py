@@ -145,6 +145,10 @@ class SMPPMAdapter:
         self.optimizer_state = deepcopy(optimizer.state_dict()) if self.episodic else None
         self.last_losses = {}
         self.num_forwards = 0
+        self.adaptation_steps = 0
+        self.updated_parameter_count = sum(
+            p.numel() for p in self.model.parameters() if p.requires_grad
+        )
 
         if self.steps < 1:
             raise ValueError(f"SM-PPM steps must be >= 1, got {self.steps}.")
@@ -198,6 +202,10 @@ class SMPPMAdapter:
             self.style_alpha,
         )
         logger.info(
+            "SM-PPM trainable parameter count: %d",
+            self.updated_parameter_count,
+        )
+        logger.info(
             "SM style mixing backend: tensor-space AdaIN from target image "
             "statistics onto source images; source labels remain aligned."
         )
@@ -231,6 +239,7 @@ class SMPPMAdapter:
             f"  style_backend=medical_adain\n"
             f"  style_alpha={self.style_alpha}\n"
             f"  log_interval={self.log_interval}\n"
+            f"  updated_parameter_count={self.updated_parameter_count}\n"
             f"  sm_unavailable_reason="
             f"{'current DCON tta_smppm.py has no explicit SM style-mixing implementation' if not STYLE_MIXING_AVAILABLE else 'available'}"
         )
@@ -371,6 +380,7 @@ class SMPPMAdapter:
             loss = self.segmentation_criterion(logits, source_label.long(), pixel_weight)
         loss.backward()
         self.optimizer.step()
+        self.adaptation_steps += 1
         return {
             "loss": loss,
             "pixel_weight": pixel_weight,
@@ -443,6 +453,10 @@ class SMPPMAdapter:
         return {
             "loss": total_loss,
             "entropy": masked_entropy,
+            "entropy_mean": norm_entropy.detach().mean(),
+            "entropy_max": norm_entropy.detach().max(),
+            "confidence_mean": max_prob.detach().mean(),
+            "confidence_max": max_prob.detach().max(),
             "proto": proto_loss,
             "reliable_fraction": reliable_float.mean().detach(),
             "reliable_pixels": reliable_count.detach(),
@@ -457,6 +471,7 @@ class SMPPMAdapter:
         losses = self._source_free_losses(logits, feature)
         losses["loss"].backward()
         self.optimizer.step()
+        self.adaptation_steps += 1
         return losses
 
     @torch.enable_grad()
@@ -480,11 +495,12 @@ class SMPPMAdapter:
                 prototypes,
                 target_img=target_img if self.uses_sm else None,
             )
-            if self._should_log_batch(self.num_forwards + 1):
+            if self._should_log_batch(self.num_forwards + 1) or self.ablation_mode == "source_ce_only":
                 logger.info(
                     "smppm_mode=%s target_batch=%d step=%d/%d "
                     "loss_total=%.6f loss_source=%.6f loss_entropy=0.000000 "
                     "loss_proto=0.000000 weight_mean=%.6f weight_max=%.6f "
+                    "proto_conf_mean=%.6f proto_conf_max=%.6f entropy_mean=%.6f entropy_max=%.6f "
                     "source_loader=%s source_label=%s SM=%s PPM=%s target_only_loss=%s",
                     self.ablation_mode,
                     self.num_forwards + 1,
@@ -494,6 +510,10 @@ class SMPPMAdapter:
                     float(step_stats["loss"].detach().item()),
                     float(step_stats["pixel_weight"].detach().mean().item()),
                     float(step_stats["pixel_weight"].detach().max().item()),
+                    float(step_stats["confidence"].detach().mean().item()),
+                    float(step_stats["confidence"].detach().max().item()),
+                    float(step_stats["entropy"].detach().mean().item()),
+                    float(step_stats["entropy"].detach().max().item()),
                     self.uses_source_loader,
                     self.uses_source_label,
                     self.uses_sm,
@@ -515,21 +535,33 @@ class SMPPMAdapter:
                 "smppm_loss_proto": 0.0,
                 "smppm_weight_mean": float(step_stats["pixel_weight"].detach().mean().item()),
                 "smppm_weight_max": float(step_stats["pixel_weight"].detach().max().item()),
+                "smppm_proto_conf_mean": float(step_stats["confidence"].detach().mean().item()),
+                "smppm_proto_conf_max": float(step_stats["confidence"].detach().max().item()),
+                "smppm_entropy_mean": float(step_stats["entropy"].detach().mean().item()),
+                "smppm_entropy_max": float(step_stats["entropy"].detach().max().item()),
+                "smppm_adaptation_steps": float(self.adaptation_steps),
+                "smppm_updated_params": float(self.updated_parameter_count),
                 "smppm_use_source_loader": float(self.uses_source_loader),
                 "smppm_use_source_label": float(self.uses_source_label),
                 "smppm_use_sm": float(self.uses_sm),
                 "smppm_use_ppm": float(self.uses_ppm),
                 "smppm_use_target_only_loss": float(self.uses_target_only_loss),
             }
-            if self._should_log_batch(self.num_forwards):
+            if self._should_log_batch(self.num_forwards) or self.ablation_mode == "source_ce_only":
                 logger.info(
                     "smppm_mode=%s smppm_loss_total=%.6f smppm_loss_source=%.6f "
-                    "smppm_weight_mean=%.6f smppm_weight_max=%.6f",
+                    "smppm_weight_mean=%.6f smppm_weight_max=%.6f "
+                    "smppm_proto_conf_mean=%.6f smppm_entropy_mean=%.6f "
+                    "smppm_adaptation_steps=%.0f smppm_updated_params=%.0f",
                     self.ablation_mode,
                     self.last_losses["smppm_loss_total"],
                     self.last_losses["smppm_loss_source"],
                     self.last_losses["smppm_weight_mean"],
                     self.last_losses["smppm_weight_max"],
+                    self.last_losses["smppm_proto_conf_mean"],
+                    self.last_losses["smppm_entropy_mean"],
+                    self.last_losses["smppm_adaptation_steps"],
+                    self.last_losses["smppm_updated_params"],
                 )
 
         return logits
@@ -550,7 +582,8 @@ class SMPPMAdapter:
                     "smppm_mode=%s target_batch=%d step=%d/%d "
                     "loss_total=%.6f loss_source=0.000000 loss_entropy=%.6f "
                     "loss_proto=%.6f reliable_fraction=%.6f reliable_pixels=%.1f "
-                    "proto_classes=%.1f proto_pixels=%.1f source_loader=%s "
+                    "proto_classes=%.1f proto_pixels=%.1f entropy_mean=%.6f "
+                    "entropy_max=%.6f confidence_mean=%.6f confidence_max=%.6f source_loader=%s "
                     "source_label=%s SM=%s PPM=%s target_only_loss=%s",
                     self.ablation_mode,
                     self.num_forwards + 1,
@@ -563,6 +596,10 @@ class SMPPMAdapter:
                     float(step_stats["reliable_pixels"].detach().item()),
                     float(step_stats["proto_classes"].detach().item()),
                     float(step_stats["proto_pixels"].detach().item()),
+                    float(step_stats["entropy_mean"].detach().item()),
+                    float(step_stats["entropy_max"].detach().item()),
+                    float(step_stats["confidence_mean"].detach().item()),
+                    float(step_stats["confidence_max"].detach().item()),
                     self.uses_source_loader,
                     self.uses_source_label,
                     self.uses_sm,
@@ -581,13 +618,19 @@ class SMPPMAdapter:
                 "smppm_loss_total": float(step_stats["loss"].detach().item()),
                 "smppm_loss_source": 0.0,
                 "smppm_loss_entropy": float(step_stats["entropy"].detach().item()),
+                "smppm_entropy_mean": float(step_stats["entropy_mean"].detach().item()),
+                "smppm_entropy_max": float(step_stats["entropy_max"].detach().item()),
                 "smppm_loss_proto": float(step_stats["proto"].detach().item()),
                 "smppm_reliable_fraction": float(step_stats["reliable_fraction"].detach().item()),
                 "smppm_reliable_pixels": float(step_stats["reliable_pixels"].detach().item()),
                 "smppm_proto_classes": float(step_stats["proto_classes"].detach().item()),
                 "smppm_proto_pixels": float(step_stats["proto_pixels"].detach().item()),
+                "smppm_proto_conf_mean": float(step_stats["confidence_mean"].detach().item()),
+                "smppm_proto_conf_max": float(step_stats["confidence_max"].detach().item()),
                 "smppm_weight_mean": 1.0,
                 "smppm_weight_max": 1.0,
+                "smppm_adaptation_steps": float(self.adaptation_steps),
+                "smppm_updated_params": float(self.updated_parameter_count),
                 "smppm_use_source_loader": float(self.uses_source_loader),
                 "smppm_use_source_label": float(self.uses_source_label),
                 "smppm_use_sm": float(self.uses_sm),
@@ -597,12 +640,18 @@ class SMPPMAdapter:
             if self._should_log_batch(self.num_forwards):
                 logger.info(
                     "smppm_mode=%s smppm_loss_total=%.6f smppm_loss_entropy=%.6f "
-                    "smppm_loss_proto=%.6f smppm_reliable_fraction=%.6f",
+                    "smppm_loss_proto=%.6f smppm_reliable_fraction=%.6f "
+                    "smppm_entropy_mean=%.6f smppm_proto_conf_mean=%.6f "
+                    "smppm_adaptation_steps=%.0f smppm_updated_params=%.0f",
                     self.ablation_mode,
                     self.last_losses["smppm_loss_total"],
                     self.last_losses["smppm_loss_entropy"],
                     self.last_losses["smppm_loss_proto"],
                     self.last_losses["smppm_reliable_fraction"],
+                    self.last_losses["smppm_entropy_mean"],
+                    self.last_losses["smppm_proto_conf_mean"],
+                    self.last_losses["smppm_adaptation_steps"],
+                    self.last_losses["smppm_updated_params"],
                 )
 
         return logits

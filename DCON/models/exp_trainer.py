@@ -75,6 +75,10 @@ def collect_bn_affine_params(model):
     return params, names
 
 
+def parameter_count(params):
+    return sum(param.numel() for param in params)
+
+
 class AlphaBatchNorm2d(nn.Module):
     """Blend source BatchNorm statistics with current test-batch statistics."""
     def __init__(self, layer, alpha):
@@ -375,6 +379,13 @@ class Train_process():
         self.tta_mode = getattr(opt, 'tta', 'none')
         self.tent_optimizer = None
         self.tent_param_names = []
+        self.tent_source_loader = source_loader
+        self.tent_source_iter = iter(source_loader) if source_loader is not None else None
+        self.sar_optimizer = None
+        self.sar_param_names = []
+        self.sar_params = []
+        self.sar_source_loader = source_loader
+        self.sar_source_iter = iter(source_loader) if source_loader is not None else None
         self.dgtta_optimizer = None
         self.dgtta_adapter = None
         self.cotta_optimizer = None
@@ -413,6 +424,8 @@ class Train_process():
         if istest == 1:
             if self.tta_mode == 'tent':
                 self.configure_tent()
+            elif self.tta_mode == 'sar':
+                self.configure_sar()
             elif self.tta_mode == 'dg_tta':
                 self.configure_dg_tta()
             elif self.tta_mode == 'norm_test':
@@ -434,6 +447,12 @@ class Train_process():
                 smppm_mode = getattr(self.opt, 'smppm_ablation_mode', 'full')
                 if source_loader is None and smppm_mode != 'source_free_proto':
                     print("SM-PPM requested: call configure_smppm(source_loader) before te_func_smppm.")
+                else:
+                    self.configure_smppm(source_loader)
+            elif self.tta_mode == 'source_ce_only':
+                self.opt.smppm_ablation_mode = 'source_ce_only'
+                if source_loader is None:
+                    print("source_ce_only requested: call configure_smppm(source_loader) before te_func_smppm.")
                 else:
                     self.configure_smppm(source_loader)
             elif self.tta_mode == 'gtta':
@@ -482,7 +501,43 @@ class Train_process():
             betas=(0.9, 0.999),
             weight_decay=0.0,
         )
-        print(f"TENT enabled: updating {len(params)} BatchNorm affine tensors")
+        msg = (
+            f"TENT enabled: updating {len(params)} BatchNorm affine tensors "
+            f"({parameter_count(params)} parameters), "
+            f"source_access={getattr(self.opt, 'source_access', False)}, "
+            f"lambda_source={getattr(self.opt, 'lambda_source', 0.0)}"
+        )
+        print(msg)
+        logger.info(msg)
+        for name in names:
+            print(f"  - {name}")
+
+    def configure_sar(self):
+        configure_model_for_tent(self.netseg)
+        params, names = collect_bn_affine_params(self.netseg)
+        if len(params) == 0:
+            raise RuntimeError("SAR requires BatchNorm2d affine parameters, but none were found.")
+
+        self.sar_params = params
+        self.sar_param_names = names
+        self.sar_optimizer = torch.optim.Adam(
+            params,
+            lr=getattr(self.opt, 'sar_lr', 1e-4),
+            betas=(0.9, 0.999),
+            weight_decay=0.0,
+        )
+        msg = (
+            f"SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; "
+            f"updating {len(params)} BatchNorm affine tensors "
+            f"({parameter_count(params)} parameters), "
+            f"lr={getattr(self.opt, 'sar_lr', 1e-4)}, "
+            f"steps={getattr(self.opt, 'sar_steps', 1)}, "
+            f"rho={getattr(self.opt, 'sar_rho', 0.05)}, "
+            f"source_access={getattr(self.opt, 'source_access', False)}, "
+            f"lambda_source={getattr(self.opt, 'lambda_source', 0.0)}"
+        )
+        print(msg)
+        logger.info(msg)
         for name in names:
             print(f"  - {name}")
 
@@ -547,7 +602,9 @@ class Train_process():
             f"steps={getattr(self.opt, 'cotta_steps', 1)}, "
             f"mt={getattr(self.opt, 'cotta_mt', 0.999)}, "
             f"rst={getattr(self.opt, 'cotta_rst', 0.01)}, "
-            f"ap={getattr(self.opt, 'cotta_ap', 0.9)}"
+            f"ap={getattr(self.opt, 'cotta_ap', 0.9)}, "
+            f"source_access={getattr(self.opt, 'source_access', False)}, "
+            f"lambda_source={getattr(self.opt, 'lambda_source', 0.0)}"
         )
 
     def configure_memo(self):
@@ -595,6 +652,68 @@ class Train_process():
         loss_ce = self.criterionCE(inputs=logits, targets=labels)
         loss = (loss_dice * self.opt.w_dice + loss_ce * self.opt.w_ce) * self.opt.w_seg
         return loss
+
+    def _source_anchor_enabled(self):
+        return bool(getattr(self.opt, 'source_access', False)) and getattr(self.opt, 'lambda_source', 0.0) > 0.0
+
+    def _source_iter_attr(self):
+        if self.tta_mode == 'sar':
+            return 'sar_source_loader', 'sar_source_iter'
+        return 'tent_source_loader', 'tent_source_iter'
+
+    def _next_anchor_source_batch(self):
+        loader_attr, iter_attr = self._source_iter_attr()
+        source_loader = getattr(self, loader_attr, None)
+        if source_loader is None:
+            raise RuntimeError(
+                f"{self.tta_mode} with --source_access true requires a labeled "
+                "source-domain training loader."
+            )
+        source_iter = getattr(self, iter_attr, None)
+        if source_iter is None:
+            source_iter = iter(source_loader)
+            setattr(self, iter_attr, source_iter)
+        try:
+            return next(source_iter)
+        except StopIteration:
+            source_iter = iter(source_loader)
+            setattr(self, iter_attr, source_iter)
+            try:
+                return next(source_iter)
+            except StopIteration as exc:
+                raise RuntimeError(
+                    f"{self.tta_mode} source loader yielded no batches. Check "
+                    "the source training split, batch size, and drop_last setting."
+                ) from exc
+
+    def _extract_source_anchor(self, batch):
+        if isinstance(batch, dict):
+            image = batch.get("base_view", None)
+            if image is None:
+                image = batch.get("image", None)
+            label = batch.get("label", None)
+            if image is None or label is None:
+                raise KeyError("Source anchor batch must contain an image/base_view and label.")
+            return image, label
+        if isinstance(batch, (tuple, list)) and len(batch) >= 2:
+            return batch[0], batch[1]
+        raise TypeError(f"Unsupported source anchor batch type: {type(batch)}")
+
+    def _source_anchor_loss(self, batch=None):
+        if batch is None:
+            batch = self._next_anchor_source_batch()
+        source_img, source_label = self._extract_source_anchor(batch)
+        source_img = source_img.cuda(non_blocking=True).float()
+        source_label = source_label.cuda(non_blocking=True).long()
+        source_logits = forward_logits(self.netseg, source_img)
+        if source_logits.shape[2:] != source_label.shape[-2:]:
+            source_logits = F.interpolate(
+                source_logits,
+                size=source_label.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        return self.asm_segmentation_loss(source_logits, source_label)
 
     def smppm_segmentation_loss(self, logits, labels, pixel_weight):
         """DCON Dice+CE source loss with SM-PPM pixel confidence weights."""
@@ -1268,10 +1387,18 @@ class Train_process():
 
         logits = None
         loss = None
+        loss_tta = None
+        loss_source = None
         self.netseg.train()
         for _ in range(getattr(self.opt, 'tent_steps', 1)):
             logits = forward_logits(self.netseg, self.input_img_te)
-            loss = softmax_entropy_seg(logits)
+            loss_tta = softmax_entropy_seg(logits)
+            if self._source_anchor_enabled():
+                loss_source = self._source_anchor_loss()
+                loss = loss_tta + getattr(self.opt, 'lambda_source', 0.0) * loss_source
+            else:
+                loss_source = torch.zeros((), device=self.input_img_te.device)
+                loss = loss_tta
             self.tent_optimizer.zero_grad()
             loss.backward()
             self.tent_optimizer.step()
@@ -1279,6 +1406,95 @@ class Train_process():
         seg = torch.argmax(logits.detach(), 1)
         self.netseg.zero_grad()
         self.last_tent_loss = loss.detach() if loss is not None else None
+        self.last_tent_losses = {
+            "tent_loss_total": float(loss.detach().item()) if loss is not None else 0.0,
+            "tent_loss_tta": float(loss_tta.detach().item()) if loss_tta is not None else 0.0,
+            "tent_loss_source": float(loss_source.detach().item()) if loss_source is not None else 0.0,
+            "tent_source_access": float(self._source_anchor_enabled()),
+            "tent_updated_params": float(parameter_count(self.tent_optimizer.param_groups[0]["params"])),
+        }
+        return self.input_mask_te, seg
+
+    def _sar_grad_norm(self):
+        shared_device = self.sar_params[0].device
+        grad_norms = [
+            param.grad.detach().norm(p=2).to(shared_device)
+            for param in self.sar_params
+            if param.grad is not None
+        ]
+        if len(grad_norms) == 0:
+            return torch.zeros((), device=shared_device)
+        norm = torch.norm(torch.stack(grad_norms), p=2)
+        return norm
+
+    @torch.no_grad()
+    def _sar_perturb(self, grad_norm):
+        scale = getattr(self.opt, 'sar_rho', 0.05) / (grad_norm + 1e-12)
+        perturbations = []
+        for param in self.sar_params:
+            if param.grad is None:
+                perturbations.append(None)
+                continue
+            eps = param.grad.detach() * scale.to(param.device)
+            param.add_(eps)
+            perturbations.append(eps)
+        return perturbations
+
+    @torch.no_grad()
+    def _sar_restore(self, perturbations):
+        for param, eps in zip(self.sar_params, perturbations):
+            if eps is not None:
+                param.sub_(eps)
+
+    def _sar_total_loss(self, source_batch=None):
+        logits = forward_logits(self.netseg, self.input_img_te)
+        loss_tta = softmax_entropy_seg(logits)
+        if self._source_anchor_enabled():
+            loss_source = self._source_anchor_loss(source_batch)
+            loss = loss_tta + getattr(self.opt, 'lambda_source', 0.0) * loss_source
+        else:
+            loss_source = torch.zeros((), device=self.input_img_te.device)
+            loss = loss_tta
+        return logits, loss, loss_tta, loss_source
+
+    @torch.enable_grad()
+    def te_func_sar(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.sar_optimizer is None:
+            raise RuntimeError("SAR optimizer is not initialized. Call configure_sar() first.")
+
+        logits = None
+        loss = None
+        loss_tta = None
+        loss_source = None
+        self.netseg.train()
+        for _ in range(getattr(self.opt, 'sar_steps', 1)):
+            source_batch = self._next_anchor_source_batch() if self._source_anchor_enabled() else None
+            self.sar_optimizer.zero_grad()
+            _, first_loss, _, _ = self._sar_total_loss(source_batch)
+            first_loss.backward()
+            grad_norm = self._sar_grad_norm()
+            perturbations = self._sar_perturb(grad_norm)
+
+            self.sar_optimizer.zero_grad()
+            logits, loss, loss_tta, loss_source = self._sar_total_loss(source_batch)
+            loss.backward()
+            self._sar_restore(perturbations)
+            self.sar_optimizer.step()
+
+        with torch.no_grad():
+            final_logits = forward_logits(self.netseg, self.input_img_te)
+        seg = torch.argmax(final_logits.detach(), 1)
+        self.netseg.zero_grad()
+        self.last_sar_losses = {
+            "sar_loss_total": float(loss.detach().item()) if loss is not None else 0.0,
+            "sar_loss_tta": float(loss_tta.detach().item()) if loss_tta is not None else 0.0,
+            "sar_loss_source": float(loss_source.detach().item()) if loss_source is not None else 0.0,
+            "sar_source_access": float(self._source_anchor_enabled()),
+            "sar_updated_params": float(parameter_count(self.sar_params)),
+        }
         return self.input_mask_te, seg
 
     @torch.enable_grad()
@@ -1305,6 +1521,9 @@ class Train_process():
 
         self.netseg.train()
         outputs_ema = None
+        loss = None
+        loss_tta = None
+        loss_source = None
         for _ in range(getattr(self.opt, 'cotta_steps', 1)):
             outputs = forward_logits(self.netseg, self.input_img_te)
 
@@ -1315,7 +1534,13 @@ class Train_process():
                 if anchor_prob.mean() < getattr(self.opt, 'cotta_ap', 0.9):
                     outputs_ema = self.cotta_ensemble_prediction(self.input_img_te, outputs_ema)
 
-            loss = (-(outputs_ema.softmax(1) * outputs.log_softmax(1)).sum(1)).mean()
+            loss_tta = (-(outputs_ema.softmax(1) * outputs.log_softmax(1)).sum(1)).mean()
+            if self._source_anchor_enabled():
+                loss_source = self._source_anchor_loss()
+                loss = loss_tta + getattr(self.opt, 'lambda_source', 0.0) * loss_source
+            else:
+                loss_source = torch.zeros((), device=self.input_img_te.device)
+                loss = loss_tta
             self.cotta_optimizer.zero_grad()
             loss.backward()
             self.cotta_optimizer.step()
@@ -1329,6 +1554,13 @@ class Train_process():
 
         self.netseg.zero_grad()
         self.last_cotta_loss = loss.detach()
+        self.last_cotta_losses = {
+            "cotta_loss_total": float(loss.detach().item()) if loss is not None else 0.0,
+            "cotta_loss_tta": float(loss_tta.detach().item()) if loss_tta is not None else 0.0,
+            "cotta_loss_source": float(loss_source.detach().item()) if loss_source is not None else 0.0,
+            "cotta_source_access": float(self._source_anchor_enabled()),
+            "cotta_updated_params": float(parameter_count(self.cotta_optimizer.param_groups[0]["params"])),
+        }
         return self.input_mask_te, seg
 
     @torch.enable_grad()
@@ -1599,6 +1831,8 @@ class Train_process():
         tta_mode = getattr(self.opt, 'tta', 'none')
         if tta_mode == 'tent':
             return self.te_func_tent(input)
+        if tta_mode == 'sar':
+            return self.te_func_sar(input)
         if tta_mode == 'dg_tta':
             return self.te_func_dg_tta(input)
         if tta_mode in ['norm_test', 'norm_alpha', 'norm_ema']:
@@ -1609,7 +1843,7 @@ class Train_process():
             return self.te_func_memo(input)
         if tta_mode == 'asm':
             return self.te_func_asm(input)
-        if tta_mode == 'sm_ppm':
+        if tta_mode in ['sm_ppm', 'source_ce_only']:
             return self.te_func_smppm(input)
         if tta_mode == 'gtta':
             return self.te_func_gtta(input)

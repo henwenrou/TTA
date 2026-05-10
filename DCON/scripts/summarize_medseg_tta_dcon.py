@@ -37,6 +37,12 @@ LEGACY_EXP_NAMES = {
         "bSSFP->LGE": "tent_dcon_bl_bssfp",
         "LGE->bSSFP": "tent_dcon_lb_lge",
     },
+    "sar": {
+        "SABSCT->CHAOST2": "sar_dcon_sc_sabsct",
+        "CHAOST2->SABSCT": "sar_dcon_cs_chaost2",
+        "bSSFP->LGE": "sar_dcon_bl_bssfp",
+        "LGE->bSSFP": "sar_dcon_lb_lge",
+    },
     "norm_test": {
         "SABSCT->CHAOST2": "norm_test_dcon_sc_sabsct",
         "CHAOST2->SABSCT": "norm_test_dcon_cs_chaost2",
@@ -79,6 +85,12 @@ LEGACY_EXP_NAMES = {
         "bSSFP->LGE": "smppm_dcon_bl_lge",
         "LGE->bSSFP": "smppm_dcon_lb_bssfp",
     },
+    "source_ce_only": {
+        "SABSCT->CHAOST2": "smppm_source_ce_only_dcon_sc_chaost2 source_ce_only_dcon_sabsct_to_chaost2",
+        "CHAOST2->SABSCT": "smppm_source_ce_only_dcon_cs_sabsct source_ce_only_dcon_chaost2_to_sabsct",
+        "bSSFP->LGE": "smppm_source_ce_only_dcon_bl_lge source_ce_only_dcon_bssfp_to_lge",
+        "LGE->bSSFP": "smppm_source_ce_only_dcon_lb_bssfp source_ce_only_dcon_lge_to_bssfp",
+    },
     "gtta": {
         "SABSCT->CHAOST2": "gtta_dcon_sc_chaost2",
         "CHAOST2->SABSCT": "gtta_dcon_cs_sabsct",
@@ -96,6 +108,10 @@ LEGACY_EXP_NAMES = {
 METHOD_ALIASES = {
     "sm_ppm": ["sm_ppm", "smppm"],
     "dg_tta": ["dg_tta", "dgtta"],
+    "tent_source_ce": ["tent_source_ce"],
+    "sar_source_ce": ["sar_source_ce"],
+    "cotta_source_ce": ["cotta_source_ce"],
+    "source_ce_only": ["source_ce_only", "smppm_source_ce_only"],
 }
 
 
@@ -112,7 +128,11 @@ def parse_args():
     parser.add_argument(
         "--methods",
         nargs="+",
-        default=["none", "tent", "dg_tta", "memo", "asm", "sm_ppm", "gtta", "gold", "spmo"],
+        default=[
+            "none", "tent", "tent_source_ce", "sar", "sar_source_ce",
+            "cotta", "cotta_source_ce", "source_ce_only", "sm_ppm",
+            "dg_tta", "memo", "asm", "gtta", "gold", "spmo",
+        ],
         help="Methods to include.",
     )
     return parser.parse_args()

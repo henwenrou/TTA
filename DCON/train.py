@@ -312,14 +312,24 @@ def get_args():
     parser.add_argument('--eval_source_domain', type=str2bool, nargs='?', const=True, default=True,
                         help='Also evaluate the source-domain trtest split after target evaluation.')
     parser.add_argument('--tta', type=str, default='none',
-                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'dg_tta', 'cotta', 'memo', 'asm', 'sm_ppm', 'gtta', 'gold', 'vptta', 'pass', 'samtta', 'spmo', 'sictta', 'a3_tta'],
+                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'sar', 'dg_tta', 'cotta', 'memo', 'asm', 'sm_ppm', 'source_ce_only', 'gtta', 'gold', 'vptta', 'pass', 'samtta', 'spmo', 'sictta', 'a3_tta'],
                         help='Test-time adaptation method.')
+    parser.add_argument('--source_access', type=str2bool, nargs='?', const=True, default=False,
+                        help='Add one labeled source batch to each TENT/SAR/CoTTA adaptation step.')
+    parser.add_argument('--lambda_source', type=float, default=1.0,
+                        help='Weight for supervised source Dice+CE anchor in source-access TTA variants.')
     parser.add_argument('--bn_alpha', type=float, default=0.1,
                         help='Source/test BN-stat mixing coefficient for norm_alpha.')
     parser.add_argument('--tent_lr', type=float, default=1e-4,
                         help='Learning rate for TENT BN affine updates.')
     parser.add_argument('--tent_steps', type=int, default=1,
                         help='Number of TENT adaptation steps per test batch.')
+    parser.add_argument('--sar_lr', type=float, default=1e-4,
+                        help='Learning rate for SAR BN affine updates.')
+    parser.add_argument('--sar_steps', type=int, default=1,
+                        help='Number of SAR adaptation steps per test batch.')
+    parser.add_argument('--sar_rho', type=float, default=0.05,
+                        help='Sharpness perturbation radius for lightweight SAR.')
     parser.add_argument('--dgtta_lr', type=float, default=1e-4,
                         help='Learning rate for DG-TTA BN affine updates.')
     parser.add_argument('--dgtta_steps', type=int, default=1,
@@ -723,6 +733,8 @@ def get_args():
         mode_tag = f"smppm_{args.smppm_ablation_mode}"
         if mode_tag not in args.expname:
             args.expname = f"{mode_tag}_{args.expname}"
+    if args.phase == 'test' and args.tta == 'source_ce_only':
+        args.smppm_ablation_mode = 'source_ce_only'
 
     # Validate RCCS parameters
     if hasattr(args, 'use_rccs') and args.use_rccs:
@@ -758,6 +770,16 @@ def get_args():
         raise ValueError(f"Invalid tent_steps={args.tent_steps}. Must be >= 1")
     if args.tent_lr <= 0:
         raise ValueError(f"Invalid tent_lr={args.tent_lr}. Must be > 0")
+    if args.sar_steps < 1:
+        raise ValueError(f"Invalid sar_steps={args.sar_steps}. Must be >= 1")
+    if args.sar_lr <= 0:
+        raise ValueError(f"Invalid sar_lr={args.sar_lr}. Must be > 0")
+    if args.sar_rho < 0:
+        raise ValueError(f"Invalid sar_rho={args.sar_rho}. Must be >= 0")
+    if args.lambda_source < 0:
+        raise ValueError(f"Invalid lambda_source={args.lambda_source}. Must be >= 0")
+    if args.source_access and args.tta not in ['tent', 'sar', 'cotta']:
+        raise ValueError("--source_access is only supported for --tta tent, sar, or cotta.")
     if args.dgtta_steps < 1:
         raise ValueError(f"Invalid dgtta_steps={args.dgtta_steps}. Must be >= 1")
     if args.dgtta_lr <= 0:
@@ -1118,9 +1140,15 @@ if __name__ == '__main__':
     logging.info("opt.f_seed:"+str(opt.f_seed))
     logging.info("data:"+opt.data_name)
     logging.info("tta:"+str(opt.tta))
+    logging.info("source_access:"+str(opt.source_access))
+    logging.info("lambda_source:"+str(opt.lambda_source))
     if opt.tta == 'tent':
         logging.info("tent_lr:"+str(opt.tent_lr))
         logging.info("tent_steps:"+str(opt.tent_steps))
+    elif opt.tta == 'sar':
+        logging.info("sar_lr:"+str(opt.sar_lr))
+        logging.info("sar_steps:"+str(opt.sar_steps))
+        logging.info("sar_rho:"+str(opt.sar_rho))
     elif opt.tta == 'dg_tta':
         logging.info("dgtta_lr:"+str(opt.dgtta_lr))
         logging.info("dgtta_steps:"+str(opt.dgtta_steps))
@@ -1172,6 +1200,16 @@ if __name__ == '__main__':
         logging.info("smppm_source_free_lambda_proto:"+str(opt.smppm_source_free_lambda_proto))
         logging.info("smppm_plain_source_loader:"+str(opt.smppm_plain_source_loader))
         logging.info("smppm_style_alpha:"+str(opt.smppm_style_alpha))
+        logging.info("smppm_log_interval:"+str(opt.smppm_log_interval))
+    elif opt.tta == 'source_ce_only':
+        logging.info("=== source_ce_only Configuration ===")
+        logging.info("Official source_ce_only baseline uses SM-PPM source_ce_only behavior.")
+        logging.info("smppm_lr:"+str(opt.smppm_lr))
+        logging.info("smppm_momentum:"+str(opt.smppm_momentum))
+        logging.info("smppm_wd:"+str(opt.smppm_wd))
+        logging.info("smppm_steps:"+str(opt.smppm_steps))
+        logging.info("smppm_src_batch_size:"+str(opt.smppm_src_batch_size))
+        logging.info("smppm_plain_source_loader:"+str(opt.smppm_plain_source_loader))
         logging.info("smppm_log_interval:"+str(opt.smppm_log_interval))
     elif opt.tta == 'gtta':
         logging.info("=== GTTA Configuration ===")
@@ -1334,7 +1372,19 @@ if __name__ == '__main__':
         and opt.tta == 'sm_ppm'
         and opt.smppm_ablation_mode == 'source_free_proto'
     )
-    smppm_use_plain_source_set = smppm_requires_source_loader and opt.smppm_plain_source_loader
+    source_access_requires_source_loader = (
+        opt.phase == 'test'
+        and bool(opt.source_access)
+        and opt.tta in ['tent', 'sar', 'cotta']
+    )
+    source_ce_only_requires_source_loader = (
+        opt.phase == 'test'
+        and opt.tta == 'source_ce_only'
+    )
+    smppm_use_plain_source_set = (
+        (smppm_requires_source_loader or source_ce_only_requires_source_loader)
+        and opt.smppm_plain_source_loader
+    )
 
     if opt.data_name == 'ABDOMINAL':
         if opt.tr_domain=='SABSCT':
@@ -1409,7 +1459,7 @@ if __name__ == '__main__':
             f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
             "Target labels are not used for adaptation."
         )
-    elif smppm_requires_source_loader:
+    elif smppm_requires_source_loader or source_ce_only_requires_source_loader:
         source_train_batch_size = opt.smppm_src_batch_size
         print(
             "SM-PPM source loader: using labeled source-domain training split "
@@ -1430,14 +1480,23 @@ if __name__ == '__main__':
             f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
             "Target labels are not used for adaptation."
         )
+    elif source_access_requires_source_loader:
+        source_train_batch_size = opt.batchSize
+        print(
+            f"{opt.tta} source-access loader: using labeled source-domain training split "
+            f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
+            f"lambda_source={opt.lambda_source}. Target labels are not used for adaptation."
+        )
 
     needs_train_loader = (
         opt.phase != 'test'
         or opt.tta in ['asm', 'gtta']
         or smppm_requires_source_loader
+        or source_ce_only_requires_source_loader
+        or source_access_requires_source_loader
     )
     if needs_train_loader:
-        train_loader_dataset = source_set_for_loader if smppm_requires_source_loader else train_set
+        train_loader_dataset = source_set_for_loader if (smppm_requires_source_loader or source_ce_only_requires_source_loader) else train_set
         train_loader_kwargs = {
             "dataset": train_loader_dataset,
             "num_workers": opt.num_workers,
@@ -1473,7 +1532,16 @@ if __name__ == '__main__':
         print(f"TEST MODE")
         print(f"TTA: {opt.tta}")
         if opt.tta == 'tent':
-            print(f"TENT config: lr={opt.tent_lr}, steps={opt.tent_steps}")
+            print(
+                f"TENT config: lr={opt.tent_lr}, steps={opt.tent_steps}, "
+                f"source_access={opt.source_access}, lambda_source={opt.lambda_source}"
+            )
+        elif opt.tta == 'sar':
+            print(
+                "SAR config: lightweight BN-affine sharpness-aware entropy minimization; "
+                f"lr={opt.sar_lr}, steps={opt.sar_steps}, rho={opt.sar_rho}, "
+                f"source_access={opt.source_access}, lambda_source={opt.lambda_source}"
+            )
         elif opt.tta == 'dg_tta':
             print(
                 "DG-TTA config: MedSeg-TTA output-consistency adapter; "
@@ -1484,7 +1552,11 @@ if __name__ == '__main__':
         elif opt.tta == 'norm_alpha':
             print(f"norm_alpha config: alpha={opt.bn_alpha}")
         elif opt.tta == 'cotta':
-            print(f"CoTTA config: lr={opt.cotta_lr}, steps={opt.cotta_steps}, mt={opt.cotta_mt}, rst={opt.cotta_rst}, ap={opt.cotta_ap}")
+            print(
+                f"CoTTA config: lr={opt.cotta_lr}, steps={opt.cotta_steps}, "
+                f"mt={opt.cotta_mt}, rst={opt.cotta_rst}, ap={opt.cotta_ap}, "
+                f"source_access={opt.source_access}, lambda_source={opt.lambda_source}"
+            )
         elif opt.tta == 'memo':
             print(
                 "MEMO config: "
@@ -1518,6 +1590,15 @@ if __name__ == '__main__':
                 f"source_free_lambda_proto={opt.smppm_source_free_lambda_proto}, "
                 f"plain_source_loader={opt.smppm_plain_source_loader}, "
                 f"style_alpha={opt.smppm_style_alpha}, "
+                f"log_interval={opt.smppm_log_interval}"
+            )
+        elif opt.tta == 'source_ce_only':
+            print(
+                "source_ce_only config: official source-only supervised baseline "
+                "using the existing SM-PPM source_ce_only path; target labels are evaluation-only. "
+                f"lr={opt.smppm_lr}, momentum={opt.smppm_momentum}, wd={opt.smppm_wd}, "
+                f"steps={opt.smppm_steps}, src_batch_size={opt.smppm_src_batch_size}, "
+                f"plain_source_loader={opt.smppm_plain_source_loader}, "
                 f"log_interval={opt.smppm_log_interval}"
             )
         elif opt.tta == 'gtta':
@@ -1618,7 +1699,10 @@ if __name__ == '__main__':
 
         # Instantiate trainer
         source_dependent_loader = train_loader if (
-            opt.tta in ['asm', 'gtta'] or smppm_requires_source_loader
+            opt.tta in ['asm', 'gtta']
+            or smppm_requires_source_loader
+            or source_ce_only_requires_source_loader
+            or source_access_requires_source_loader
         ) else None
         model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=source_dependent_loader)
 
@@ -1837,7 +1921,10 @@ if __name__ == '__main__':
         print('final test epoch %d, iters %d' %(opt.all_epoch, total_steps))
         reload_model_fid = os.path.join(snap_dir, f'{opt.all_epoch}_net_Seg.pth')
         print("reload_model_fid:",reload_model_fid)
-        source_dependent_loader = train_loader if opt.tta in ['asm', 'sm_ppm', 'gtta'] else None
+        source_dependent_loader = train_loader if (
+            opt.tta in ['asm', 'sm_ppm', 'source_ce_only', 'gtta']
+            or source_access_requires_source_loader
+        ) else None
         model1=Train_process(opt,reloaddir=reload_model_fid,istest=1, source_loader=source_dependent_loader)
 
         with torch.no_grad():

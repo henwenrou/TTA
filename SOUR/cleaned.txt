@@ -1,0 +1,2980 @@
+整理一下现在的实验还差了一些,我不数了几个,我记得是四个实验,现在跑到第几个了,还剩哪些没跑完。
+Last login: Sat May  9 22:04:19 on ttys005
+> ssh -p 24682 root@link.lanyun.net
+root@link.lanyun.net's password: 
+Welcome to Ubuntu 22.04.5 LTS (GNU/Linux 5.15.0-112-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/pro
+
+This system has been minimized by removing packages and content that are
+not required on a system that users do not log into.
+
+To restore this content, you can run the 'unminimize' command.
+Last login: Wed May  6 11:33:46 2026 from 214.10.7.13
++--------------------------------------------------LanYun--------------------------------------------------------+
+目录说明:
+╔═════════════════╦════════╦════╦═════════════════════════════════════════════════════════════════════════╗
+║目录             ║名称    ║速度║说明                                                                     ║
+╠═════════════════╬════════╬════╬═════════════════════════════════════════════════════════════════════════╣
+║/                ║系 统 盘║一般║实例关机数据不会丢失，可存放代码等。会随保存镜像一起保存。               ║
+║/root/tmp        ║数 据 盘║ 快 ║实例关机数据不会丢失，可存放读写IO要求高的数据。但不会随保存镜像一起保存 ║
+╚═════════════════╩════════╩════╩═════════════════════════════════════════════════════════════════════════╝
+CPU ：10 核心
+内存：30 GB
+GPU ：NVIDIA GeForce RTX 3090, 1
+存储：
+  系 统 盘/               ：3% 801M/30G
+  数 据 盘/root/lanyun-tmp：0% 0/50G
+  文件存储/root/lanyun-fs ：0% 0/200G
++----------------------------------------------------------------------------------------------------------------+
+*注意: 系统盘较小请将大的数据存放于数据盘或网盘中，重置系统时数据盘和网盘中的数据不受影响
+root@1ea1c3a8f553:~# conda activate tpsdg
+ (tpsdg) root@1ea1c3a8f553:~#  cd TTA/DCON/
+(tpsdg) root@1ea1c3a8f553:~/TTA/DCON# 
+(tpsdg) root@1ea1c3a8f553:~/TTA/DCON# 
+(tpsdg) root@1ea1c3a8f553:~/TTA/DCON# 
+METHODS="tent tent_source_ce sar sar_source_ce cotta cotta_source_ce source_ce_only sm_ppm" \
+RESULTS_DIR=results_source_access_compare \
+bash scripts/run_medseg_tta_dcon.sh
+Project: /root/TTA/DCON
+Python: python
+SAA_DATA_ROOT: /root/TTA/DCON/data
+Results: results_source_access_compare
+Methods: tent tent_source_ce sar sar_source_ce cotta cotta_source_ce source_ce_only sm_ppm
+
+==========================================
+tent: ABDOMINAL SABSCT->CHAOST2
+checkpoint: ../ckpts/dcon-sc-300.pth
+expname: tent_dcon_sabsct_to_chaost2
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/SABSCT/tent_dcon_sabsct_to_chaost2
+================================================================================
+
+[15:07:55.501] name:tent_dcon_sabsct_to_chaost2
+[15:07:55.501] use_cgsd:0
+[15:07:55.501] view_pipeline:GIP->CLP
+[15:07:55.501] opt.f_seed:1
+[15:07:55.501] data:ABDOMINAL
+[15:07:55.501] tta:tent
+[15:07:55.501] tent_lr:0.0001
+[15:07:55.501] tent_steps:1
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['SABSCT']
+Applying GIP/CLP location-scale augmentation on train split
+train_SABSCT: Using fold data statistics for normalization
+For train on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29']}
+get_trval abd: ['SABSCT']
+For trval on ['SABSCT'] using scan ids {'SABSCT': ['6', '7', '8']}
+get_trtest abd: ['SABSCT']
+For trtest on ['SABSCT'] using scan ids {'SABSCT': ['0', '1', '2', '3', '4', '5']}
+get_test abd: ['CHAOST2']
+test_CHAOST2: Using fold data statistics for normalization
+For test on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '0', '1', '2', '3', '4', '5']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-sc-300.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-sc-300.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████| 538/538 [00:29<00:00, 18.26it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9774954974651336 
+, std: 0.00614956243855782
+Organ liver with dice: mean: 0.7894732117652893 
+, std: 0.05164267028652237
+Organ rk with dice: mean: 0.8215545266866684 
+, std: 0.051983001419012236
+Organ lk with dice: mean: 0.8215357929468154 
+, std: 0.04955003427822609
+Organ spleen with dice: mean: 0.7967214703559875 
+, std: 0.07292708265242158
+Overall mean dice by sample 0.8073212504386902
+Overall mean dice by domain 0.8073212504386902
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/SABSCT/tent_dcon_sabsct_to_chaost2/log
+
+==========================================
+tent: ABDOMINAL CHAOST2->SABSCT
+checkpoint: ../ckpts/dcon-cs-200.pth
+expname: tent_dcon_chaost2_to_sabsct
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/CHAOST2/tent_dcon_chaost2_to_sabsct
+================================================================================
+
+[15:08:57.409] name:tent_dcon_chaost2_to_sabsct
+[15:08:57.409] use_cgsd:0
+[15:08:57.409] view_pipeline:GIP->CLP
+[15:08:57.409] opt.f_seed:1
+[15:08:57.409] data:ABDOMINAL
+[15:08:57.409] tta:tent
+[15:08:57.409] tent_lr:0.0001
+[15:08:57.409] tent_steps:1
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['CHAOST2']
+Applying GIP/CLP location-scale augmentation on train split
+train_CHAOST2: Using fold data statistics for normalization
+For train on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19']}
+get_trval abd: ['CHAOST2']
+For trval on ['CHAOST2'] using scan ids {'CHAOST2': ['4', '5']}
+get_trtest abd: ['CHAOST2']
+For trtest on ['CHAOST2'] using scan ids {'CHAOST2': ['0', '1', '2', '3']}
+get_test abd: ['SABSCT']
+test_SABSCT: Using fold data statistics for normalization
+For test on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '0', '1', '2', '3', '4', '5', '6', '7', '8']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-cs-200.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-cs-200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|█████████████████| 1725/1725 [01:32<00:00, 18.58it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9752152264118195 
+, std: 0.007108084459696188
+Organ liver with dice: mean: 0.8011576453844707 
+, std: 0.058804504982056194
+Organ rk with dice: mean: 0.7564441951612632 
+, std: 0.15664395547670895
+Organ lk with dice: mean: 0.7197375764449437 
+, std: 0.11309533138973679
+Organ spleen with dice: mean: 0.6117696662743887 
+, std: 0.14522126204792782
+Overall mean dice by sample 0.7222772708162666
+Overall mean dice by domain 0.7222773432731628
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/CHAOST2/tent_dcon_chaost2_to_sabsct/log
+
+==========================================
+tent: CARDIAC bSSFP->LGE
+checkpoint: ../ckpts/dcon-bl-1200.pth
+expname: tent_dcon_bssfp_to_lge
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/bSSFP/tent_dcon_bssfp_to_lge
+================================================================================
+
+[15:11:03.722] name:tent_dcon_bssfp_to_lge
+[15:11:03.723] use_cgsd:0
+[15:11:03.723] view_pipeline:GIP->CLP
+[15:11:03.723] opt.f_seed:1
+[15:11:03.723] data:CARDIAC
+[15:11:03.723] tta:tent
+[15:11:03.723] tent_lr:0.0001
+[15:11:03.723] tent_steps:1
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['bSSFP']
+Applying GIP/CLP location-scale augmentation on train split
+train_bSSFP: Using fold data statistics for normalization
+For train on ['bSSFP'] using scan ids {'bSSFP': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['bSSFP']
+trval_bSSFP: Using fold data statistics for normalization
+For trval on ['bSSFP'] using scan ids {'bSSFP': ['11', '12', '13', '14']}
+get_trtest cardiac: ['bSSFP']
+trtest_bSSFP: Using fold data statistics for normalization
+For trtest on ['bSSFP'] using scan ids {'bSSFP': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['LGE']
+test_LGE: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-bl-1200.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-bl-1200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████| 731/731 [00:38<00:00, 18.79it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9910439862145318 
+, std: 0.0019107958242054713
+Organ LV with dice: mean: 0.7720442401038276 
+, std: 0.05561725308470888
+Organ Myo with dice: mean: 0.8524899919827779 
+, std: 0.05675417927944015
+Organ RV with dice: mean: 0.8388964295387268 
+, std: 0.05901523809228617
+Overall mean dice by sample 0.8211435538751107
+Overall mean dice by domain 0.8211435675621033
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/bSSFP/tent_dcon_bssfp_to_lge/log
+
+==========================================
+tent: CARDIAC LGE->bSSFP
+checkpoint: ../ckpts/dcon-lb-500.pth
+expname: tent_dcon_lge_to_bssfp
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/LGE/tent_dcon_lge_to_bssfp
+================================================================================
+
+[15:12:07.026] name:tent_dcon_lge_to_bssfp
+[15:12:07.027] use_cgsd:0
+[15:12:07.027] view_pipeline:GIP->CLP
+[15:12:07.027] opt.f_seed:1
+[15:12:07.027] data:CARDIAC
+[15:12:07.027] tta:tent
+[15:12:07.027] tent_lr:0.0001
+[15:12:07.027] tent_steps:1
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['LGE']
+Applying GIP/CLP location-scale augmentation on train split
+train_LGE: Using fold data statistics for normalization
+For train on ['LGE'] using scan ids {'LGE': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['LGE']
+trval_LGE: Using fold data statistics for normalization
+For trval on ['LGE'] using scan ids {'LGE': ['11', '12', '13', '14']}
+get_trtest cardiac: ['LGE']
+trtest_LGE: Using fold data statistics for normalization
+For trtest on ['LGE'] using scan ids {'LGE': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['bSSFP']
+test_bSSFP: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-lb-500.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-lb-500.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████| 554/554 [00:16<00:00, 33.25it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9864884045388963 
+, std: 0.0034935573649219056
+Organ LV with dice: mean: 0.7167445235782199 
+, std: 0.05187524827074455
+Organ Myo with dice: mean: 0.84580952723821 
+, std: 0.04986952140957741
+Organ RV with dice: mean: 0.8154233561621772 
+, std: 0.05788645362335486
+Overall mean dice by sample 0.7926591356595357
+Overall mean dice by domain 0.7926591634750366
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/LGE/tent_dcon_lge_to_bssfp/log
+
+Unknown method: tent_source_ce
+(tpsdg) root@1ea1c3a8f553:~/TTA/DCON# 
+(tpsdg) root@1ea1c3a8f553:~/TTA/DCON# 
+(tpsdg) root@1ea1c3a8f553:~/TTA/DCON# git pull origin
+remote: Enumerating objects: 100, done.
+remote: Counting objects: 100% (100/100), done.
+remote: Compressing objects: 100% (39/39), done.
+remote: Total 77 (delta 60), reused 53 (delta 36), pack-reused 0 (from 0)
+Unpacking objects: 100% (77/77), 148.10 KiB | 291.00 KiB/s, done.
+From github.com:henwenrou/TTA
+   3af36f7..1e12a69  main       -> origin/main
+Updating 3af36f7..1e12a69
+Fast-forward
+ .DS_Store                                          |  Bin 10244 -> 10244 bytes
+ DCON/.DS_Store                                     |  Bin 8196 -> 10244 bytes
+ DCON/__pycache__/train.cpython-313.pyc             |  Bin 53584 -> 137210 bytes
+ DCON/dataloaders/AbdominalDataset.py               |    6 +
+ DCON/dataloaders/CardiacDataset.py                 |    6 +
+ DCON/docs/.DS_Store                                |  Bin 0 -> 6148 bytes
+ DCON/docs/tta_codebase_implementation_map.md       |  747 ++++++++
+ .../models/__pycache__/exp_trainer.cpython-313.pyc |  Bin 38484 -> 121810 bytes
+ DCON/models/__pycache__/tta_smppm.cpython-313.pyc  |  Bin 0 -> 34359 bytes
+ DCON/models/exp_trainer.py                         |  280 ++-
+ DCON/models/tta_smppm.py                           |  521 +++++-
+ DCON/scripts/.DS_Store                             |  Bin 6148 -> 6148 bytes
+ DCON/scripts/run_common_tta_sourceonly_ckpts.sh    |   50 +-
+ DCON/scripts/run_medseg_tta_dcon.sh                |   73 +-
+ .../scripts/run_smppm_ablation_sourceonly_ckpts.sh |   13 +
+ DCON/scripts/run_smppm_full_sm_ckpts.sh            |    9 +
+ DCON/scripts/run_smppm_sourceonly_ckpts.sh         |   66 +-
+ DCON/scripts/summarize_medseg_tta_dcon.py          |   22 +-
+ DCON/train.py                                      |  245 ++-
+ GOLD/.DS_Store                                     |  Bin 6148 -> 6148 bytes
+ GOLD/classification/.DS_Store                      |  Bin 0 -> 8196 bytes
+ GOLD/segmentation/.DS_Store                        |  Bin 0 -> 6148 bytes
+ exp.md                                             | 1862 --------------------
+ 23 files changed, 1951 insertions(+), 1949 deletions(-)
+ create mode 100644 DCON/docs/.DS_Store
+ create mode 100644 DCON/docs/tta_codebase_implementation_map.md
+ create mode 100644 DCON/models/__pycache__/tta_smppm.cpython-313.pyc
+ create mode 100755 DCON/scripts/run_smppm_ablation_sourceonly_ckpts.sh
+ create mode 100755 DCON/scripts/run_smppm_full_sm_ckpts.sh
+ create mode 100644 GOLD/classification/.DS_Store
+ create mode 100644 GOLD/segmentation/.DS_Store
+ delete mode 100644 exp.md
+(tpsdg) root@1ea1c3a8f553:~/TTA/DCON# cd /Users/RexRyder/PycharmProjects/TTA/DCON
+
+METHODS="tent tent_source_ce sar sar_source_ce cotta cotta_source_ce source_ce_only sm_ppm" \
+RESULTS_DIR=results_source_access_compare \
+bash scripts/run_medseg_tta_dcon.sh
+-bash: cd: /Users/RexRyder/PycharmProjects/TTA/DCON: No such file or directory
+Project: /root/TTA/DCON
+Python: python
+SAA_DATA_ROOT: /root/TTA/DCON/data
+Results: results_source_access_compare
+Methods: tent tent_source_ce sar sar_source_ce cotta cotta_source_ce source_ce_only sm_ppm
+
+==========================================
+tent: ABDOMINAL SABSCT->CHAOST2
+checkpoint: ../ckpts/dcon-sc-300.pth
+expname: tent_dcon_sabsct_to_chaost2
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/SABSCT/tent_dcon_sabsct_to_chaost2
+================================================================================
+
+[15:16:57.031] name:tent_dcon_sabsct_to_chaost2
+[15:16:57.031] use_cgsd:0
+[15:16:57.031] view_pipeline:GIP->CLP
+[15:16:57.031] opt.f_seed:1
+[15:16:57.031] data:ABDOMINAL
+[15:16:57.031] tta:tent
+[15:16:57.031] source_access:False
+[15:16:57.031] lambda_source:1.0
+[15:16:57.031] tent_lr:0.0001
+[15:16:57.031] tent_steps:1
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['SABSCT']
+Applying GIP/CLP location-scale augmentation on train split
+train_SABSCT: Using fold data statistics for normalization
+For train on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29']}
+get_trval abd: ['SABSCT']
+For trval on ['SABSCT'] using scan ids {'SABSCT': ['6', '7', '8']}
+get_trtest abd: ['SABSCT']
+For trtest on ['SABSCT'] using scan ids {'SABSCT': ['0', '1', '2', '3', '4', '5']}
+get_test abd: ['CHAOST2']
+test_CHAOST2: Using fold data statistics for normalization
+For test on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '0', '1', '2', '3', '4', '5']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-sc-300.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-sc-300.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=False, lambda_source=1.0
+[15:17:24.648] TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=False, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████| 538/538 [00:30<00:00, 17.70it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9774953871965408 
+, std: 0.006151014506519784
+Organ liver with dice: mean: 0.7894742846488952 
+, std: 0.05163637377441572
+Organ rk with dice: mean: 0.8215417683124542 
+, std: 0.05195706316556613
+Organ lk with dice: mean: 0.8215507179498672 
+, std: 0.04953841920985191
+Organ spleen with dice: mean: 0.7967776447534561 
+, std: 0.07287686006759118
+Overall mean dice by sample 0.8073361039161682
+Overall mean dice by domain 0.8073360323905945
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/SABSCT/tent_dcon_sabsct_to_chaost2/log
+
+==========================================
+tent: ABDOMINAL CHAOST2->SABSCT
+checkpoint: ../ckpts/dcon-cs-200.pth
+expname: tent_dcon_chaost2_to_sabsct
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/CHAOST2/tent_dcon_chaost2_to_sabsct
+================================================================================
+
+[15:17:59.501] name:tent_dcon_chaost2_to_sabsct
+[15:17:59.501] use_cgsd:0
+[15:17:59.501] view_pipeline:GIP->CLP
+[15:17:59.501] opt.f_seed:1
+[15:17:59.501] data:ABDOMINAL
+[15:17:59.501] tta:tent
+[15:17:59.501] source_access:False
+[15:17:59.501] lambda_source:1.0
+[15:17:59.502] tent_lr:0.0001
+[15:17:59.502] tent_steps:1
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['CHAOST2']
+Applying GIP/CLP location-scale augmentation on train split
+train_CHAOST2: Using fold data statistics for normalization
+For train on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19']}
+get_trval abd: ['CHAOST2']
+For trval on ['CHAOST2'] using scan ids {'CHAOST2': ['4', '5']}
+get_trtest abd: ['CHAOST2']
+For trtest on ['CHAOST2'] using scan ids {'CHAOST2': ['0', '1', '2', '3']}
+get_test abd: ['SABSCT']
+test_SABSCT: Using fold data statistics for normalization
+For test on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '0', '1', '2', '3', '4', '5', '6', '7', '8']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-cs-200.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-cs-200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=False, lambda_source=1.0
+[15:18:28.676] TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=False, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|█████████████████| 1725/1725 [01:26<00:00, 20.02it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9752153833707173 
+, std: 0.007108195663890465
+Organ liver with dice: mean: 0.8011577785015106 
+, std: 0.05880308833916877
+Organ rk with dice: mean: 0.7564596630632877 
+, std: 0.1566448007687558
+Organ lk with dice: mean: 0.7197504878044129 
+, std: 0.11309624972597226
+Organ spleen with dice: mean: 0.6117703378200531 
+, std: 0.14520230852947566
+Overall mean dice by sample 0.7222845667973161
+Overall mean dice by domain 0.7222845554351807
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/CHAOST2/tent_dcon_chaost2_to_sabsct/log
+
+==========================================
+tent: CARDIAC bSSFP->LGE
+checkpoint: ../ckpts/dcon-bl-1200.pth
+expname: tent_dcon_bssfp_to_lge
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/bSSFP/tent_dcon_bssfp_to_lge
+================================================================================
+
+[15:19:59.456] name:tent_dcon_bssfp_to_lge
+[15:19:59.456] use_cgsd:0
+[15:19:59.456] view_pipeline:GIP->CLP
+[15:19:59.456] opt.f_seed:1
+[15:19:59.456] data:CARDIAC
+[15:19:59.456] tta:tent
+[15:19:59.456] source_access:False
+[15:19:59.456] lambda_source:1.0
+[15:19:59.456] tent_lr:0.0001
+[15:19:59.456] tent_steps:1
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['bSSFP']
+Applying GIP/CLP location-scale augmentation on train split
+train_bSSFP: Using fold data statistics for normalization
+For train on ['bSSFP'] using scan ids {'bSSFP': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['bSSFP']
+trval_bSSFP: Using fold data statistics for normalization
+For trval on ['bSSFP'] using scan ids {'bSSFP': ['11', '12', '13', '14']}
+get_trtest cardiac: ['bSSFP']
+trtest_bSSFP: Using fold data statistics for normalization
+For trtest on ['bSSFP'] using scan ids {'bSSFP': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['LGE']
+test_LGE: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-bl-1200.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-bl-1200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=False, lambda_source=1.0
+[15:20:19.726] TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=False, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████| 731/731 [00:39<00:00, 18.31it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.99104253715939 
+, std: 0.001910346645135201
+Organ LV with dice: mean: 0.7720404558711582 
+, std: 0.05563336405499432
+Organ Myo with dice: mean: 0.8524958517816331 
+, std: 0.056748178703659294
+Organ RV with dice: mean: 0.8388361679183112 
+, std: 0.05901849124807738
+Overall mean dice by sample 0.8211241585237009
+Overall mean dice by domain 0.8211241364479065
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/bSSFP/tent_dcon_bssfp_to_lge/log
+
+==========================================
+tent: CARDIAC LGE->bSSFP
+checkpoint: ../ckpts/dcon-lb-500.pth
+expname: tent_dcon_lge_to_bssfp
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/LGE/tent_dcon_lge_to_bssfp
+================================================================================
+
+[15:21:04.297] name:tent_dcon_lge_to_bssfp
+[15:21:04.297] use_cgsd:0
+[15:21:04.297] view_pipeline:GIP->CLP
+[15:21:04.297] opt.f_seed:1
+[15:21:04.297] data:CARDIAC
+[15:21:04.297] tta:tent
+[15:21:04.297] source_access:False
+[15:21:04.297] lambda_source:1.0
+[15:21:04.297] tent_lr:0.0001
+[15:21:04.297] tent_steps:1
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['LGE']
+Applying GIP/CLP location-scale augmentation on train split
+train_LGE: Using fold data statistics for normalization
+For train on ['LGE'] using scan ids {'LGE': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['LGE']
+trval_LGE: Using fold data statistics for normalization
+For trval on ['LGE'] using scan ids {'LGE': ['11', '12', '13', '14']}
+get_trtest cardiac: ['LGE']
+trtest_LGE: Using fold data statistics for normalization
+For trtest on ['LGE'] using scan ids {'LGE': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['bSSFP']
+test_bSSFP: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-lb-500.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-lb-500.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=False, lambda_source=1.0
+[15:21:24.444] TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=False, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████| 554/554 [00:29<00:00, 18.97it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.986485481262207 
+, std: 0.0034940804347078297
+Organ LV with dice: mean: 0.71664729780621 
+, std: 0.05188464201304428
+Organ Myo with dice: mean: 0.8457979069815742 
+, std: 0.04987667959000202
+Organ RV with dice: mean: 0.8154481556680467 
+, std: 0.057893954594406834
+Overall mean dice by sample 0.7926311201519436
+Overall mean dice by domain 0.7926311492919922
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/LGE/tent_dcon_lge_to_bssfp/log
+
+==========================================
+tent_source_ce: ABDOMINAL SABSCT->CHAOST2
+checkpoint: ../ckpts/dcon-sc-300.pth
+expname: tent_source_ce_dcon_sabsct_to_chaost2
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/SABSCT/tent_source_ce_dcon_sabsct_to_chaost2
+================================================================================
+
+[15:21:57.760] name:tent_source_ce_dcon_sabsct_to_chaost2
+[15:21:57.760] use_cgsd:0
+[15:21:57.760] view_pipeline:GIP->CLP
+[15:21:57.760] opt.f_seed:1
+[15:21:57.760] data:ABDOMINAL
+[15:21:57.761] tta:tent
+[15:21:57.761] source_access:True
+[15:21:57.761] lambda_source:1.0
+[15:21:57.761] tent_lr:0.0001
+[15:21:57.761] tent_steps:1
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['SABSCT']
+Applying GIP/CLP location-scale augmentation on train split
+train_SABSCT: Using fold data statistics for normalization
+For train on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29']}
+get_trval abd: ['SABSCT']
+For trval on ['SABSCT'] using scan ids {'SABSCT': ['6', '7', '8']}
+get_trtest abd: ['SABSCT']
+For trtest on ['SABSCT'] using scan ids {'SABSCT': ['0', '1', '2', '3', '4', '5']}
+get_test abd: ['CHAOST2']
+test_CHAOST2: Using fold data statistics for normalization
+For test on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '0', '1', '2', '3', '4', '5']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+tent source-access loader: using labeled source-domain training split with batch_size=32, shuffle=True, drop_last=True. lambda_source=1.0. Target labels are not used for adaptation.
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1, source_access=True, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-sc-300.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-sc-300.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=True, lambda_source=1.0
+[15:22:35.967] TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=True, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████| 538/538 [10:11<00:00,  1.14s/it]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9778189212083817 
+, std: 0.006113486504585162
+Organ liver with dice: mean: 0.7998859792947769 
+, std: 0.0532421466959338
+Organ rk with dice: mean: 0.8249944090843201 
+, std: 0.05370719670147741
+Organ lk with dice: mean: 0.8254593193531037 
+, std: 0.05146665138434799
+Organ spleen with dice: mean: 0.8012614935636521 
+, std: 0.066700160376881
+Overall mean dice by sample 0.8129003003239632
+Overall mean dice by domain 0.8129003643989563
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/SABSCT/tent_source_ce_dcon_sabsct_to_chaost2/log
+
+==========================================
+tent_source_ce: ABDOMINAL CHAOST2->SABSCT
+checkpoint: ../ckpts/dcon-cs-200.pth
+expname: tent_source_ce_dcon_chaost2_to_sabsct
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/CHAOST2/tent_source_ce_dcon_chaost2_to_sabsct
+================================================================================
+
+[15:32:51.382] name:tent_source_ce_dcon_chaost2_to_sabsct
+[15:32:51.382] use_cgsd:0
+[15:32:51.382] view_pipeline:GIP->CLP
+[15:32:51.382] opt.f_seed:1
+[15:32:51.382] data:ABDOMINAL
+[15:32:51.382] tta:tent
+[15:32:51.382] source_access:True
+[15:32:51.382] lambda_source:1.0
+[15:32:51.382] tent_lr:0.0001
+[15:32:51.382] tent_steps:1
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['CHAOST2']
+Applying GIP/CLP location-scale augmentation on train split
+train_CHAOST2: Using fold data statistics for normalization
+For train on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19']}
+get_trval abd: ['CHAOST2']
+For trval on ['CHAOST2'] using scan ids {'CHAOST2': ['4', '5']}
+get_trtest abd: ['CHAOST2']
+For trtest on ['CHAOST2'] using scan ids {'CHAOST2': ['0', '1', '2', '3']}
+get_test abd: ['SABSCT']
+test_SABSCT: Using fold data statistics for normalization
+For test on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '0', '1', '2', '3', '4', '5', '6', '7', '8']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+tent source-access loader: using labeled source-domain training split with batch_size=32, shuffle=True, drop_last=True. lambda_source=1.0. Target labels are not used for adaptation.
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1, source_access=True, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-cs-200.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-cs-200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=True, lambda_source=1.0
+[15:33:30.688] TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=True, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|█████████████████| 1725/1725 [32:40<00:00,  1.14s/it]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9760043601195018 
+, std: 0.006835875073323601
+Organ liver with dice: mean: 0.8122551798820495 
+, std: 0.05880522995736066
+Organ rk with dice: mean: 0.7602532687286536 
+, std: 0.15617549554536844
+Organ lk with dice: mean: 0.7116110265254975 
+, std: 0.12181257138785094
+Organ spleen with dice: mean: 0.638665372133255 
+, std: 0.14287312136408498
+Overall mean dice by sample 0.7306962118173639
+Overall mean dice by domain 0.7306962609291077
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/CHAOST2/tent_source_ce_dcon_chaost2_to_sabsct/log
+
+==========================================
+tent_source_ce: CARDIAC bSSFP->LGE
+checkpoint: ../ckpts/dcon-bl-1200.pth
+expname: tent_source_ce_dcon_bssfp_to_lge
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/bSSFP/tent_source_ce_dcon_bssfp_to_lge
+================================================================================
+
+[16:06:15.018] name:tent_source_ce_dcon_bssfp_to_lge
+[16:06:15.018] use_cgsd:0
+[16:06:15.018] view_pipeline:GIP->CLP
+[16:06:15.018] opt.f_seed:1
+[16:06:15.018] data:CARDIAC
+[16:06:15.018] tta:tent
+[16:06:15.018] source_access:True
+[16:06:15.018] lambda_source:1.0
+[16:06:15.018] tent_lr:0.0001
+[16:06:15.018] tent_steps:1
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['bSSFP']
+Applying GIP/CLP location-scale augmentation on train split
+train_bSSFP: Using fold data statistics for normalization
+For train on ['bSSFP'] using scan ids {'bSSFP': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['bSSFP']
+trval_bSSFP: Using fold data statistics for normalization
+For trval on ['bSSFP'] using scan ids {'bSSFP': ['11', '12', '13', '14']}
+get_trtest cardiac: ['bSSFP']
+trtest_bSSFP: Using fold data statistics for normalization
+For trtest on ['bSSFP'] using scan ids {'bSSFP': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['LGE']
+test_LGE: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+tent source-access loader: using labeled source-domain training split with batch_size=32, shuffle=True, drop_last=True. lambda_source=1.0. Target labels are not used for adaptation.
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1, source_access=True, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-bl-1200.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-bl-1200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=True, lambda_source=1.0
+[16:06:44.476] TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=True, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████████████| 731/731 [13:40<00:00,  1.12s/it]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9910110632578532 
+, std: 0.0019340265224294256
+Organ LV with dice: mean: 0.7752883103158739 
+, std: 0.057407055924130014
+Organ Myo with dice: mean: 0.8511923445595635 
+, std: 0.056949743327922846
+Organ RV with dice: mean: 0.837709551387363 
+, std: 0.0597990124885949
+Overall mean dice by sample 0.8213967354209335
+Overall mean dice by domain 0.8213967680931091
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/bSSFP/tent_source_ce_dcon_bssfp_to_lge/log
+
+==========================================
+tent_source_ce: CARDIAC LGE->bSSFP
+checkpoint: ../ckpts/dcon-lb-500.pth
+expname: tent_source_ce_dcon_lge_to_bssfp
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/LGE/tent_source_ce_dcon_lge_to_bssfp
+================================================================================
+
+[16:20:28.520] name:tent_source_ce_dcon_lge_to_bssfp
+[16:20:28.520] use_cgsd:0
+[16:20:28.520] view_pipeline:GIP->CLP
+[16:20:28.520] opt.f_seed:1
+[16:20:28.520] data:CARDIAC
+[16:20:28.520] tta:tent
+[16:20:28.520] source_access:True
+[16:20:28.520] lambda_source:1.0
+[16:20:28.520] tent_lr:0.0001
+[16:20:28.520] tent_steps:1
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['LGE']
+Applying GIP/CLP location-scale augmentation on train split
+train_LGE: Using fold data statistics for normalization
+For train on ['LGE'] using scan ids {'LGE': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['LGE']
+trval_LGE: Using fold data statistics for normalization
+For trval on ['LGE'] using scan ids {'LGE': ['11', '12', '13', '14']}
+get_trtest cardiac: ['LGE']
+trtest_LGE: Using fold data statistics for normalization
+For trtest on ['LGE'] using scan ids {'LGE': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['bSSFP']
+test_bSSFP: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+tent source-access loader: using labeled source-domain training split with batch_size=32, shuffle=True, drop_last=True. lambda_source=1.0. Target labels are not used for adaptation.
+
+================================================================================
+TEST MODE
+TTA: tent
+TENT config: lr=0.0001, steps=1, source_access=True, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-lb-500.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-lb-500.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=True, lambda_source=1.0
+[16:20:58.043] TENT enabled: updating 52 BatchNorm affine tensors (4864 parameters), source_access=True, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████████████| 554/554 [10:01<00:00,  1.09s/it]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9862357311778598 
+, std: 0.003590077211589575
+Organ LV with dice: mean: 0.7131467541058858 
+, std: 0.05317045930877948
+Organ Myo with dice: mean: 0.8448174423641629 
+, std: 0.050605481286939875
+Organ RV with dice: mean: 0.8151492714881897 
+, std: 0.05939054227714002
+Overall mean dice by sample 0.7910378226527461
+Overall mean dice by domain 0.7910377979278564
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/LGE/tent_source_ce_dcon_lge_to_bssfp/log
+
+==========================================
+sar: ABDOMINAL SABSCT->CHAOST2
+checkpoint: ../ckpts/dcon-sc-300.pth
+expname: sar_dcon_sabsct_to_chaost2
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/SABSCT/sar_dcon_sabsct_to_chaost2
+================================================================================
+
+[16:31:03.756] name:sar_dcon_sabsct_to_chaost2
+[16:31:03.756] use_cgsd:0
+[16:31:03.756] view_pipeline:GIP->CLP
+[16:31:03.756] opt.f_seed:1
+[16:31:03.756] data:ABDOMINAL
+[16:31:03.756] tta:sar
+[16:31:03.756] source_access:False
+[16:31:03.756] lambda_source:1.0
+[16:31:03.756] sar_lr:0.0001
+[16:31:03.756] sar_steps:1
+[16:31:03.757] sar_rho:0.05
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['SABSCT']
+Applying GIP/CLP location-scale augmentation on train split
+train_SABSCT: Using fold data statistics for normalization
+For train on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29']}
+get_trval abd: ['SABSCT']
+For trval on ['SABSCT'] using scan ids {'SABSCT': ['6', '7', '8']}
+get_trtest abd: ['SABSCT']
+For trtest on ['SABSCT'] using scan ids {'SABSCT': ['0', '1', '2', '3', '4', '5']}
+get_test abd: ['CHAOST2']
+test_CHAOST2: Using fold data statistics for normalization
+For test on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '0', '1', '2', '3', '4', '5']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: sar
+SAR config: lightweight BN-affine sharpness-aware entropy minimization; lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-sc-300.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-sc-300.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+[16:31:31.385] SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████████████| 538/538 [00:56<00:00,  9.47it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9774172455072403 
+, std: 0.006093208622562989
+Organ liver with dice: mean: 0.7877291113138198 
+, std: 0.05158351281765793
+Organ rk with dice: mean: 0.820658701658249 
+, std: 0.05176935315339479
+Organ lk with dice: mean: 0.8213578194379807 
+, std: 0.049415024367137066
+Organ spleen with dice: mean: 0.7963779985904693 
+, std: 0.07263490804323834
+Overall mean dice by sample 0.8065309077501297
+Overall mean dice by domain 0.8065308332443237
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/SABSCT/sar_dcon_sabsct_to_chaost2/log
+
+==========================================
+sar: ABDOMINAL CHAOST2->SABSCT
+checkpoint: ../ckpts/dcon-cs-200.pth
+expname: sar_dcon_chaost2_to_sabsct
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/CHAOST2/sar_dcon_chaost2_to_sabsct
+================================================================================
+
+[16:32:32.437] name:sar_dcon_chaost2_to_sabsct
+[16:32:32.437] use_cgsd:0
+[16:32:32.437] view_pipeline:GIP->CLP
+[16:32:32.437] opt.f_seed:1
+[16:32:32.438] data:ABDOMINAL
+[16:32:32.438] tta:sar
+[16:32:32.438] source_access:False
+[16:32:32.438] lambda_source:1.0
+[16:32:32.438] sar_lr:0.0001
+[16:32:32.438] sar_steps:1
+[16:32:32.438] sar_rho:0.05
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['CHAOST2']
+Applying GIP/CLP location-scale augmentation on train split
+train_CHAOST2: Using fold data statistics for normalization
+For train on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19']}
+get_trval abd: ['CHAOST2']
+For trval on ['CHAOST2'] using scan ids {'CHAOST2': ['4', '5']}
+get_trtest abd: ['CHAOST2']
+For trtest on ['CHAOST2'] using scan ids {'CHAOST2': ['0', '1', '2', '3']}
+get_test abd: ['SABSCT']
+test_SABSCT: Using fold data statistics for normalization
+For test on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '0', '1', '2', '3', '4', '5', '6', '7', '8']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: sar
+SAR config: lightweight BN-affine sharpness-aware entropy minimization; lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-cs-200.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-cs-200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+[16:33:01.619] SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|█████████████████████████| 1725/1725 [02:17<00:00, 12.55it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9751446008682251 
+, std: 0.0071162809290215515
+Organ liver with dice: mean: 0.8009659647941589 
+, std: 0.058850392387760096
+Organ rk with dice: mean: 0.756710908561945 
+, std: 0.15636709260881
+Organ lk with dice: mean: 0.7184441636006037 
+, std: 0.1141546376861232
+Organ spleen with dice: mean: 0.6111975779136022 
+, std: 0.1443278485044945
+Overall mean dice by sample 0.7218296537175775
+Overall mean dice by domain 0.7218296527862549
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/CHAOST2/sar_dcon_chaost2_to_sabsct/log
+
+==========================================
+sar: CARDIAC bSSFP->LGE
+checkpoint: ../ckpts/dcon-bl-1200.pth
+expname: sar_dcon_bssfp_to_lge
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/bSSFP/sar_dcon_bssfp_to_lge
+================================================================================
+
+[16:35:23.664] name:sar_dcon_bssfp_to_lge
+[16:35:23.665] use_cgsd:0
+[16:35:23.665] view_pipeline:GIP->CLP
+[16:35:23.665] opt.f_seed:1
+[16:35:23.665] data:CARDIAC
+[16:35:23.665] tta:sar
+[16:35:23.665] source_access:False
+[16:35:23.665] lambda_source:1.0
+[16:35:23.665] sar_lr:0.0001
+[16:35:23.665] sar_steps:1
+[16:35:23.665] sar_rho:0.05
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['bSSFP']
+Applying GIP/CLP location-scale augmentation on train split
+train_bSSFP: Using fold data statistics for normalization
+For train on ['bSSFP'] using scan ids {'bSSFP': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['bSSFP']
+trval_bSSFP: Using fold data statistics for normalization
+For trval on ['bSSFP'] using scan ids {'bSSFP': ['11', '12', '13', '14']}
+get_trtest cardiac: ['bSSFP']
+trtest_bSSFP: Using fold data statistics for normalization
+For trtest on ['bSSFP'] using scan ids {'bSSFP': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['LGE']
+test_LGE: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: sar
+SAR config: lightweight BN-affine sharpness-aware entropy minimization; lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-bl-1200.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-bl-1200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+[16:35:43.936] SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████████████| 731/731 [01:15<00:00,  9.66it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9909947554270426 
+, std: 0.0018952454136914954
+Organ LV with dice: mean: 0.7714224603441027 
+, std: 0.05572665778366723
+Organ Myo with dice: mean: 0.8537856936454773 
+, std: 0.05647784338013626
+Organ RV with dice: mean: 0.8365820195939806 
+, std: 0.058845658948285896
+Overall mean dice by sample 0.8205967245278535
+Overall mean dice by domain 0.8205967545509338
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/bSSFP/sar_dcon_bssfp_to_lge/log
+
+==========================================
+sar: CARDIAC LGE->bSSFP
+checkpoint: ../ckpts/dcon-lb-500.pth
+expname: sar_dcon_lge_to_bssfp
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/LGE/sar_dcon_lge_to_bssfp
+================================================================================
+
+[16:37:03.858] name:sar_dcon_lge_to_bssfp
+[16:37:03.858] use_cgsd:0
+[16:37:03.858] view_pipeline:GIP->CLP
+[16:37:03.858] opt.f_seed:1
+[16:37:03.858] data:CARDIAC
+[16:37:03.859] tta:sar
+[16:37:03.859] source_access:False
+[16:37:03.859] lambda_source:1.0
+[16:37:03.859] sar_lr:0.0001
+[16:37:03.859] sar_steps:1
+[16:37:03.859] sar_rho:0.05
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['LGE']
+Applying GIP/CLP location-scale augmentation on train split
+train_LGE: Using fold data statistics for normalization
+For train on ['LGE'] using scan ids {'LGE': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['LGE']
+trval_LGE: Using fold data statistics for normalization
+For trval on ['LGE'] using scan ids {'LGE': ['11', '12', '13', '14']}
+get_trtest cardiac: ['LGE']
+trtest_LGE: Using fold data statistics for normalization
+For trtest on ['LGE'] using scan ids {'LGE': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['bSSFP']
+test_bSSFP: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: sar
+SAR config: lightweight BN-affine sharpness-aware entropy minimization; lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-lb-500.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-lb-500.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+[16:37:24.049] SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=False, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████████████| 554/554 [00:58<00:00,  9.43it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9864975055058797 
+, std: 0.0034968482327734714
+Organ LV with dice: mean: 0.7182743867238363 
+, std: 0.05197877309849983
+Organ Myo with dice: mean: 0.8451097514894274 
+, std: 0.0498920890456321
+Organ RV with dice: mean: 0.8148214724328783 
+, std: 0.05791407187436597
+Overall mean dice by sample 0.792735203548714
+Overall mean dice by domain 0.79273521900177
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/LGE/sar_dcon_lge_to_bssfp/log
+
+==========================================
+sar_source_ce: ABDOMINAL SABSCT->CHAOST2
+checkpoint: ../ckpts/dcon-sc-300.pth
+expname: sar_source_ce_dcon_sabsct_to_chaost2
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/SABSCT/sar_source_ce_dcon_sabsct_to_chaost2
+================================================================================
+
+[16:38:26.946] name:sar_source_ce_dcon_sabsct_to_chaost2
+[16:38:26.946] use_cgsd:0
+[16:38:26.946] view_pipeline:GIP->CLP
+[16:38:26.946] opt.f_seed:1
+[16:38:26.946] data:ABDOMINAL
+[16:38:26.946] tta:sar
+[16:38:26.946] source_access:True
+[16:38:26.946] lambda_source:1.0
+[16:38:26.946] sar_lr:0.0001
+[16:38:26.946] sar_steps:1
+[16:38:26.946] sar_rho:0.05
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['SABSCT']
+Applying GIP/CLP location-scale augmentation on train split
+train_SABSCT: Using fold data statistics for normalization
+For train on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29']}
+get_trval abd: ['SABSCT']
+For trval on ['SABSCT'] using scan ids {'SABSCT': ['6', '7', '8']}
+get_trtest abd: ['SABSCT']
+For trtest on ['SABSCT'] using scan ids {'SABSCT': ['0', '1', '2', '3', '4', '5']}
+get_test abd: ['CHAOST2']
+test_CHAOST2: Using fold data statistics for normalization
+For test on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '0', '1', '2', '3', '4', '5']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+sar source-access loader: using labeled source-domain training split with batch_size=32, shuffle=True, drop_last=True. lambda_source=1.0. Target labels are not used for adaptation.
+
+================================================================================
+TEST MODE
+TTA: sar
+SAR config: lightweight BN-affine sharpness-aware entropy minimization; lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-sc-300.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-sc-300.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+[16:39:04.229] SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████████████| 538/538 [10:13<00:00,  1.14s/it]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9777992129325866 
+, std: 0.006112706469805681
+Organ liver with dice: mean: 0.7998266279697418 
+, std: 0.05312413345980587
+Organ rk with dice: mean: 0.8243849277496338 
+, std: 0.05395503275965847
+Organ lk with dice: mean: 0.8249957263469696 
+, std: 0.050925200291833846
+Organ spleen with dice: mean: 0.8011867195367813 
+, std: 0.06641075474255716
+Overall mean dice by sample 0.8125985004007816
+Overall mean dice by domain 0.8125985860824585
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/SABSCT/sar_source_ce_dcon_sabsct_to_chaost2/log
+
+==========================================
+sar_source_ce: ABDOMINAL CHAOST2->SABSCT
+checkpoint: ../ckpts/dcon-cs-200.pth
+expname: sar_source_ce_dcon_chaost2_to_sabsct
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/CHAOST2/sar_source_ce_dcon_chaost2_to_sabsct
+================================================================================
+
+[16:49:21.515] name:sar_source_ce_dcon_chaost2_to_sabsct
+[16:49:21.516] use_cgsd:0
+[16:49:21.516] view_pipeline:GIP->CLP
+[16:49:21.516] opt.f_seed:1
+[16:49:21.516] data:ABDOMINAL
+[16:49:21.516] tta:sar
+[16:49:21.516] source_access:True
+[16:49:21.516] lambda_source:1.0
+[16:49:21.516] sar_lr:0.0001
+[16:49:21.516] sar_steps:1
+[16:49:21.516] sar_rho:0.05
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['CHAOST2']
+Applying GIP/CLP location-scale augmentation on train split
+train_CHAOST2: Using fold data statistics for normalization
+For train on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19']}
+get_trval abd: ['CHAOST2']
+For trval on ['CHAOST2'] using scan ids {'CHAOST2': ['4', '5']}
+get_trtest abd: ['CHAOST2']
+For trtest on ['CHAOST2'] using scan ids {'CHAOST2': ['0', '1', '2', '3']}
+get_test abd: ['SABSCT']
+test_SABSCT: Using fold data statistics for normalization
+For test on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '0', '1', '2', '3', '4', '5', '6', '7', '8']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+sar source-access loader: using labeled source-domain training split with batch_size=32, shuffle=True, drop_last=True. lambda_source=1.0. Target labels are not used for adaptation.
+
+================================================================================
+TEST MODE
+TTA: sar
+SAR config: lightweight BN-affine sharpness-aware entropy minimization; lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-cs-200.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-cs-200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+[16:50:00.839] SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|█████████████████████████| 1725/1725 [33:18<00:00,  1.16s/it]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9759925166765849 
+, std: 0.006828342644197659
+Organ liver with dice: mean: 0.8122340917587281 
+, std: 0.058844049875109126
+Organ rk with dice: mean: 0.7606246344745159 
+, std: 0.15611700343719606
+Organ lk with dice: mean: 0.7109086791674296 
+, std: 0.12195318337577066
+Organ spleen with dice: mean: 0.6383332331975301 
+, std: 0.1427041660425881
+Overall mean dice by sample 0.7305251596495509
+Overall mean dice by domain 0.7305250763893127
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/CHAOST2/sar_source_ce_dcon_chaost2_to_sabsct/log
+
+==========================================
+sar_source_ce: CARDIAC bSSFP->LGE
+checkpoint: ../ckpts/dcon-bl-1200.pth
+expname: sar_source_ce_dcon_bssfp_to_lge
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/bSSFP/sar_source_ce_dcon_bssfp_to_lge
+================================================================================
+
+[17:23:23.302] name:sar_source_ce_dcon_bssfp_to_lge
+[17:23:23.302] use_cgsd:0
+[17:23:23.302] view_pipeline:GIP->CLP
+[17:23:23.302] opt.f_seed:1
+[17:23:23.302] data:CARDIAC
+[17:23:23.302] tta:sar
+[17:23:23.302] source_access:True
+[17:23:23.302] lambda_source:1.0
+[17:23:23.303] sar_lr:0.0001
+[17:23:23.303] sar_steps:1
+[17:23:23.303] sar_rho:0.05
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['bSSFP']
+Applying GIP/CLP location-scale augmentation on train split
+train_bSSFP: Using fold data statistics for normalization
+For train on ['bSSFP'] using scan ids {'bSSFP': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['bSSFP']
+trval_bSSFP: Using fold data statistics for normalization
+For trval on ['bSSFP'] using scan ids {'bSSFP': ['11', '12', '13', '14']}
+get_trtest cardiac: ['bSSFP']
+trtest_bSSFP: Using fold data statistics for normalization
+For trtest on ['bSSFP'] using scan ids {'bSSFP': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['LGE']
+test_LGE: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+sar source-access loader: using labeled source-domain training split with batch_size=32, shuffle=True, drop_last=True. lambda_source=1.0. Target labels are not used for adaptation.
+
+================================================================================
+TEST MODE
+TTA: sar
+SAR config: lightweight BN-affine sharpness-aware entropy minimization; lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-bl-1200.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-bl-1200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+[17:23:52.747] SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████████████| 731/731 [13:54<00:00,  1.14s/it]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9909156110551622 
+, std: 0.0019131404839861069
+Organ LV with dice: mean: 0.775542500283983 
+, std: 0.057607392914107644
+Organ Myo with dice: mean: 0.8508175849914551 
+, std: 0.056872808109506595
+Organ RV with dice: mean: 0.8346422659026251 
+, std: 0.05980283792289796
+Overall mean dice by sample 0.8203341170593544
+Overall mean dice by domain 0.8203340768814087
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/bSSFP/sar_source_ce_dcon_bssfp_to_lge/log
+
+==========================================
+sar_source_ce: CARDIAC LGE->bSSFP
+checkpoint: ../ckpts/dcon-lb-500.pth
+expname: sar_source_ce_dcon_lge_to_bssfp
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/LGE/sar_source_ce_dcon_lge_to_bssfp
+================================================================================
+
+[17:37:50.984] name:sar_source_ce_dcon_lge_to_bssfp
+[17:37:50.984] use_cgsd:0
+[17:37:50.984] view_pipeline:GIP->CLP
+[17:37:50.984] opt.f_seed:1
+[17:37:50.984] data:CARDIAC
+[17:37:50.984] tta:sar
+[17:37:50.984] source_access:True
+[17:37:50.984] lambda_source:1.0
+[17:37:50.984] sar_lr:0.0001
+[17:37:50.984] sar_steps:1
+[17:37:50.984] sar_rho:0.05
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['LGE']
+Applying GIP/CLP location-scale augmentation on train split
+train_LGE: Using fold data statistics for normalization
+For train on ['LGE'] using scan ids {'LGE': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['LGE']
+trval_LGE: Using fold data statistics for normalization
+For trval on ['LGE'] using scan ids {'LGE': ['11', '12', '13', '14']}
+get_trtest cardiac: ['LGE']
+trtest_LGE: Using fold data statistics for normalization
+For trtest on ['LGE'] using scan ids {'LGE': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['bSSFP']
+test_bSSFP: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+sar source-access loader: using labeled source-domain training split with batch_size=32, shuffle=True, drop_last=True. lambda_source=1.0. Target labels are not used for adaptation.
+
+================================================================================
+TEST MODE
+TTA: sar
+SAR config: lightweight BN-affine sharpness-aware entropy minimization; lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-lb-500.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-lb-500.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+[17:38:20.757] SAR enabled: lightweight BN-affine sharpness-aware entropy minimization; updating 52 BatchNorm affine tensors (4864 parameters), lr=0.0001, steps=1, rho=0.05, source_access=True, lambda_source=1.0
+  - convd1.bn1.weight
+  - convd1.bn1.bias
+  - convd1.bn2.weight
+  - convd1.bn2.bias
+  - convd1.bn3.weight
+  - convd1.bn3.bias
+  - convd2.bn1.weight
+  - convd2.bn1.bias
+  - convd2.bn2.weight
+  - convd2.bn2.bias
+  - convd2.bn3.weight
+  - convd2.bn3.bias
+  - convd3.bn1.weight
+  - convd3.bn1.bias
+  - convd3.bn2.weight
+  - convd3.bn2.bias
+  - convd3.bn3.weight
+  - convd3.bn3.bias
+  - convd4.bn1.weight
+  - convd4.bn1.bias
+  - convd4.bn2.weight
+  - convd4.bn2.bias
+  - convd4.bn3.weight
+  - convd4.bn3.bias
+  - convd5.bn1.weight
+  - convd5.bn1.bias
+  - convd5.bn2.weight
+  - convd5.bn2.bias
+  - convd5.bn3.weight
+  - convd5.bn3.bias
+  - convu4.bn2.weight
+  - convu4.bn2.bias
+  - convu4.bn3.weight
+  - convu4.bn3.bias
+  - convu3.bn1.weight
+  - convu3.bn1.bias
+  - convu3.bn2.weight
+  - convu3.bn2.bias
+  - convu3.bn3.weight
+  - convu3.bn3.bias
+  - convu2.bn1.weight
+  - convu2.bn1.bias
+  - convu2.bn2.weight
+  - convu2.bn2.bias
+  - convu2.bn3.weight
+  - convu2.bn3.bias
+  - convu1.bn1.weight
+  - convu1.bn1.bias
+  - convu1.bn2.weight
+  - convu1.bn2.bias
+  - convu1.bn3.weight
+  - convu1.bn3.bias
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████████████| 554/554 [10:09<00:00,  1.10s/it]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9862253202332391 
+, std: 0.0035977226444327205
+Organ LV with dice: mean: 0.7137608210245768 
+, std: 0.05324725509989989
+Organ Myo with dice: mean: 0.8441504306263394 
+, std: 0.05058849682776155
+Organ RV with dice: mean: 0.8149708403481377 
+, std: 0.059398496859830126
+Overall mean dice by sample 0.790960697333018
+Overall mean dice by domain 0.7909606695175171
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/LGE/sar_source_ce_dcon_lge_to_bssfp/log
+
+==========================================
+cotta: ABDOMINAL SABSCT->CHAOST2
+checkpoint: ../ckpts/dcon-sc-300.pth
+expname: cotta_dcon_sabsct_to_chaost2
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/SABSCT/cotta_dcon_sabsct_to_chaost2
+================================================================================
+
+[17:48:34.068] name:cotta_dcon_sabsct_to_chaost2
+[17:48:34.068] use_cgsd:0
+[17:48:34.068] view_pipeline:GIP->CLP
+[17:48:34.068] opt.f_seed:1
+[17:48:34.069] data:ABDOMINAL
+[17:48:34.069] tta:cotta
+[17:48:34.069] source_access:False
+[17:48:34.069] lambda_source:1.0
+[17:48:34.069] cotta_lr:0.0001
+[17:48:34.069] cotta_steps:1
+[17:48:34.069] cotta_mt:0.999
+[17:48:34.069] cotta_rst:0.01
+[17:48:34.069] cotta_ap:0.9
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['SABSCT']
+Applying GIP/CLP location-scale augmentation on train split
+train_SABSCT: Using fold data statistics for normalization
+For train on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29']}
+get_trval abd: ['SABSCT']
+For trval on ['SABSCT'] using scan ids {'SABSCT': ['6', '7', '8']}
+get_trtest abd: ['SABSCT']
+For trtest on ['SABSCT'] using scan ids {'SABSCT': ['0', '1', '2', '3', '4', '5']}
+get_test abd: ['CHAOST2']
+test_CHAOST2: Using fold data statistics for normalization
+For test on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '0', '1', '2', '3', '4', '5']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: cotta
+CoTTA config: lr=0.0001, steps=1, mt=0.999, rst=0.01, ap=0.9, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-sc-300.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-sc-300.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+CoTTA enabled: lr=0.0001, steps=1, mt=0.999, rst=0.01, ap=0.9, source_access=False, lambda_source=1.0
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████████████| 538/538 [00:58<00:00,  9.22it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9816934525966644 
+, std: 0.005266855313492295
+Organ liver with dice: mean: 0.8435938119888305 
+, std: 0.05232380471872089
+Organ rk with dice: mean: 0.8455790042877197 
+, std: 0.04249392642427777
+Organ lk with dice: mean: 0.8300230592489243 
+, std: 0.05603232641839648
+Organ spleen with dice: mean: 0.7010470688343048 
+, std: 0.06789670570608737
+Overall mean dice by sample 0.8050607360899449
+Overall mean dice by domain 0.8050606846809387
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/SABSCT/cotta_dcon_sabsct_to_chaost2/log
+
+==========================================
+cotta: ABDOMINAL CHAOST2->SABSCT
+checkpoint: ../ckpts/dcon-cs-200.pth
+expname: cotta_dcon_chaost2_to_sabsct
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/CHAOST2/cotta_dcon_chaost2_to_sabsct
+================================================================================
+lambda_change=0.0, change_metric='l1', rccs_apply_to_saam=0, rccs_apply_to_base=0, rccs_embed_dim=128)
+[17:50:04.376] name:cotta_dcon_chaost2_to_sabsct
+[17:50:04.376] use_cgsd:0
+[17:50:04.376] view_pipeline:GIP->CLP
+[17:50:04.376] opt.f_seed:1
+[17:50:04.376] data:ABDOMINAL
+[17:50:04.376] tta:cotta
+[17:50:04.376] source_access:False
+[17:50:04.376] lambda_source:1.0
+[17:50:04.376] cotta_lr:0.0001
+[17:50:04.376] cotta_steps:1
+[17:50:04.376] cotta_mt:0.999
+[17:50:04.376] cotta_rst:0.01
+[17:50:04.376] cotta_ap:0.9
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['CHAOST2']
+Applying GIP/CLP location-scale augmentation on train split
+train_CHAOST2: Using fold data statistics for normalization
+For train on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19']}
+get_trval abd: ['CHAOST2']
+For trval on ['CHAOST2'] using scan ids {'CHAOST2': ['4', '5']}
+get_trtest abd: ['CHAOST2']
+For trtest on ['CHAOST2'] using scan ids {'CHAOST2': ['0', '1', '2', '3']}
+get_test abd: ['SABSCT']
+test_SABSCT: Using fold data statistics for normalization
+For test on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '0', '1', '2', '3', '4', '5', '6', '7', '8']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: cotta
+CoTTA config: lr=0.0001, steps=1, mt=0.999, rst=0.01, ap=0.9, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-cs-200.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-cs-200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+CoTTA enabled: lr=0.0001, steps=1, mt=0.999, rst=0.01, ap=0.9, source_access=False, lambda_source=1.0
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|█████████████████████████| 1725/1725 [03:10<00:00,  9.07it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9824292461077372 
+, std: 0.005899617161020061
+Organ liver with dice: mean: 0.8718273997306824 
+, std: 0.050398510565202455
+Organ rk with dice: mean: 0.7970501734564702 
+, std: 0.16219452317535904
+Organ lk with dice: mean: 0.8018881728251775 
+, std: 0.11338275766765236
+Organ spleen with dice: mean: 0.6371563345193862 
+, std: 0.14110022065672775
+Overall mean dice by sample 0.7769805201329291
+Overall mean dice by domain 0.7769805788993835
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/CHAOST2/cotta_dcon_chaost2_to_sabsct/log
+
+==========================================
+cotta: CARDIAC bSSFP->LGE
+checkpoint: ../ckpts/dcon-bl-1200.pth
+expname: cotta_dcon_bssfp_to_lge
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/bSSFP/cotta_dcon_bssfp_to_lge
+================================================================================
+
+[17:53:48.520] name:cotta_dcon_bssfp_to_lge
+[17:53:48.520] use_cgsd:0
+[17:53:48.520] view_pipeline:GIP->CLP
+[17:53:48.520] opt.f_seed:1
+[17:53:48.520] data:CARDIAC
+[17:53:48.520] tta:cotta
+[17:53:48.520] source_access:False
+[17:53:48.520] lambda_source:1.0
+[17:53:48.520] cotta_lr:0.0001
+[17:53:48.520] cotta_steps:1
+[17:53:48.520] cotta_mt:0.999
+[17:53:48.520] cotta_rst:0.01
+[17:53:48.521] cotta_ap:0.9
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['bSSFP']
+Applying GIP/CLP location-scale augmentation on train split
+train_bSSFP: Using fold data statistics for normalization
+For train on ['bSSFP'] using scan ids {'bSSFP': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['bSSFP']
+trval_bSSFP: Using fold data statistics for normalization
+For trval on ['bSSFP'] using scan ids {'bSSFP': ['11', '12', '13', '14']}
+get_trtest cardiac: ['bSSFP']
+trtest_bSSFP: Using fold data statistics for normalization
+For trtest on ['bSSFP'] using scan ids {'bSSFP': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['LGE']
+test_LGE: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: cotta
+CoTTA config: lr=0.0001, steps=1, mt=0.999, rst=0.01, ap=0.9, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-bl-1200.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-bl-1200.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+CoTTA enabled: lr=0.0001, steps=1, mt=0.999, rst=0.01, ap=0.9, source_access=False, lambda_source=1.0
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████████████| 731/731 [01:18<00:00,  9.27it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9943738381067911 
+, std: 0.0018220089212282174
+Organ LV with dice: mean: 0.7839150031407675 
+, std: 0.06003378620007582
+Organ Myo with dice: mean: 0.9014319711261325 
+, std: 0.04710808591073078
+Organ RV with dice: mean: 0.8782102425893148 
+, std: 0.0487784061534218
+Overall mean dice by sample 0.8545190722854049
+Overall mean dice by domain 0.8545191287994385
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/bSSFP/cotta_dcon_bssfp_to_lge/log
+
+==========================================
+cotta: CARDIAC LGE->bSSFP
+checkpoint: ../ckpts/dcon-lb-500.pth
+expname: cotta_dcon_lge_to_bssfp
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/LGE/cotta_dcon_lge_to_bssfp
+================================================================================
+
+[17:55:32.432] name:cotta_dcon_lge_to_bssfp
+[17:55:32.432] use_cgsd:0
+[17:55:32.432] view_pipeline:GIP->CLP
+[17:55:32.432] opt.f_seed:1
+[17:55:32.432] data:CARDIAC
+[17:55:32.432] tta:cotta
+[17:55:32.433] source_access:False
+[17:55:32.433] lambda_source:1.0
+[17:55:32.433] cotta_lr:0.0001
+[17:55:32.433] cotta_steps:1
+[17:55:32.433] cotta_mt:0.999
+[17:55:32.433] cotta_rst:0.01
+[17:55:32.433] cotta_ap:0.9
+labmap: {'0': 0, '1': 85, '2': 170, '3': 255}
+get_train cardiac: ['LGE']
+Applying GIP/CLP location-scale augmentation on train split
+train_LGE: Using fold data statistics for normalization
+For train on ['LGE'] using scan ids {'LGE': ['15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29', '30', '31', '32', '33', '34', '35', '36', '37', '38', '39', '40', '41', '42', '43', '44', '45']}
+get_trval cardiac: ['LGE']
+trval_LGE: Using fold data statistics for normalization
+For trval on ['LGE'] using scan ids {'LGE': ['11', '12', '13', '14']}
+get_trtest cardiac: ['LGE']
+trtest_LGE: Using fold data statistics for normalization
+For trtest on ['LGE'] using scan ids {'LGE': ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10']}
+get_test cardiac: ['bSSFP']
+test_bSSFP: Using fold data statistics for normalization
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+
+================================================================================
+TEST MODE
+TTA: cotta
+CoTTA config: lr=0.0001, steps=1, mt=0.999, rst=0.01, ap=0.9, source_access=False, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-lb-500.pth
+Number of parameters (segmentation): 3185844
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-lb-500.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+CoTTA enabled: lr=0.0001, steps=1, mt=0.999, rst=0.01, ap=0.9, source_access=False, lambda_source=1.0
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation: 100%|███████████████████████████| 554/554 [01:00<00:00,  9.11it/s]
+=======  Epoch 0 test result on mode testfinal seg:  =======
+Organ bg with dice: mean: 0.9937199698554144 
+, std: 0.0015168127840226762
+Organ LV with dice: mean: 0.801429377661811 
+, std: 0.03252709928287608
+Organ Myo with dice: mean: 0.9126029623879327 
+, std: 0.024335915244389508
+Organ RV with dice: mean: 0.8965351714028252 
+, std: 0.032492615431277384
+Overall mean dice by sample 0.8701891704841896
+Overall mean dice by domain 0.8701891303062439
+
+Skipping source-domain evaluation (--eval_source_domain false).
+
+Test completed! Results saved in: /root/TTA/DCON/results_source_access_compare/LGE/cotta_dcon_lge_to_bssfp/log
+
+==========================================
+cotta_source_ce: ABDOMINAL SABSCT->CHAOST2
+checkpoint: ../ckpts/dcon-sc-300.pth
+expname: cotta_source_ce_dcon_sabsct_to_chaost2
+==========================================
+Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).
+SGF disabled: strong view uses CLP directly.
+
+================================================================================
+Checkpoint directory: /root/TTA/DCON/results_source_access_compare
+Experiment directory: /root/TTA/DCON/results_source_access_compare/SABSCT/cotta_source_ce_dcon_sabsct_to_chaost2
+================================================================================
+
+[17:56:57.839] name:cotta_source_ce_dcon_sabsct_to_chaost2
+[17:56:57.839] use_cgsd:0
+[17:56:57.839] view_pipeline:GIP->CLP
+[17:56:57.839] opt.f_seed:1
+[17:56:57.839] data:ABDOMINAL
+[17:56:57.839] tta:cotta
+[17:56:57.839] source_access:True
+[17:56:57.839] lambda_source:1.0
+[17:56:57.839] cotta_lr:0.0001
+[17:56:57.839] cotta_steps:1
+[17:56:57.839] cotta_mt:0.999
+[17:56:57.839] cotta_rst:0.01
+[17:56:57.839] cotta_ap:0.9
+labmap: {'0': 0, '1': 63, '2': 126, '3': 189, '4': 255}
+get_train abd: ['SABSCT']
+Applying GIP/CLP location-scale augmentation on train split
+train_SABSCT: Using fold data statistics for normalization
+For train on ['SABSCT'] using scan ids {'SABSCT': ['9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '20', '21', '22', '23', '24', '25', '26', '27', '28', '29']}
+get_trval abd: ['SABSCT']
+For trval on ['SABSCT'] using scan ids {'SABSCT': ['6', '7', '8']}
+get_trtest abd: ['SABSCT']
+For trtest on ['SABSCT'] using scan ids {'SABSCT': ['0', '1', '2', '3', '4', '5']}
+get_test abd: ['CHAOST2']
+test_CHAOST2: Using fold data statistics for normalization
+For test on ['CHAOST2'] using scan ids {'CHAOST2': ['6', '7', '8', '9', '10', '11', '12', '13', '14', '15', '16', '17', '18', '19', '0', '1', '2', '3', '4', '5']}
+⚠️  WARNING: LocationScaleAugmentation detected with prefetch_factor=4
+   Reducing to prefetch_factor=2 to prevent deadlock with GIP/CLP augmentation
+cotta source-access loader: using labeled source-domain training split with batch_size=32, shuffle=True, drop_last=True. lambda_source=1.0. Target labels are not used for adaptation.
+
+================================================================================
+TEST MODE
+TTA: cotta
+CoTTA config: lr=0.0001, steps=1, mt=0.999, rst=0.01, ap=0.9, source_access=True, lambda_source=1.0
+================================================================================
+
+Loading checkpoint: ../ckpts/dcon-sc-300.pth
+Number of parameters (segmentation): 3186133
+CGSD disabled: model follows the old no-CGSD branch
+reloaddir: ../ckpts/dcon-sc-300.pth
+optimizer_seg initialized: 106 parameter groups (includes all)
+CoTTA enabled: lr=0.0001, steps=1, mt=0.999, rst=0.01, ap=0.9, source_access=True, lambda_source=1.0
+
+================================================================================
+Testing on target domain...
+================================================================================
+testfinal evaluation:  25%|██████▉                    | 137/538 [02:36<04:27,  1.50it/s]Connection to link.lanyun.net closed by remote host.
+Connection to link.lanyun.net closed.
+~ >                                                                      255 2h 53m 51s

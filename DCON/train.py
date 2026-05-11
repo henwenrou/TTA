@@ -20,8 +20,10 @@ import numpy as np
 import argparse
 import os.path as osp
 import glob
+import sys
 from PIL import Image
 from models.exp_trainer import *
+from utils.prototype import export_source_prototypes
 
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -312,7 +314,7 @@ def get_args():
     parser.add_argument('--eval_source_domain', type=str2bool, nargs='?', const=True, default=True,
                         help='Also evaluate the source-domain trtest split after target evaluation.')
     parser.add_argument('--tta', type=str, default='none',
-                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'sar', 'dg_tta', 'cotta', 'memo', 'asm', 'sm_ppm', 'source_ce_only', 'gtta', 'gold', 'vptta', 'pass', 'samtta', 'spmo', 'sictta', 'a3_tta'],
+                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'sar', 'dg_tta', 'cotta', 'memo', 'asm', 'sm_ppm', 'source_ce_only', 'saam_spmm', 'gtta', 'gold', 'vptta', 'pass', 'samtta', 'spmo', 'sictta', 'a3_tta'],
                         help='Test-time adaptation method.')
     parser.add_argument('--source_access', type=str2bool, nargs='?', const=True, default=False,
                         help='Add one labeled source batch to each TENT/SAR/CoTTA adaptation step.')
@@ -414,6 +416,44 @@ def get_args():
                         help='Blend weight for SM-PPM tensor-space AdaIN style mixing; 1 uses full target statistics.')
     parser.add_argument('--smppm_log_interval', type=int, default=0,
                         help='Log SM-PPM per-batch loss every N target batches; 0 disables per-batch loss logs.')
+    parser.add_argument('--saam_spmm_lr', type=float, default=1e-4,
+                        help='Learning rate for SAAM-SPMM online updates.')
+    parser.add_argument('--saam_spmm_weight_decay', type=float, default=0.0,
+                        help='Weight decay for SAAM-SPMM optimizer.')
+    parser.add_argument('--use_stable_mask', type=int, default=1,
+                        help='SAAM-SPMM ablation: use stable-region mask, 1=on, 0=off.')
+    parser.add_argument('--use_source_anchor', type=int, default=1,
+                        help='SAAM-SPMM ablation: use pre-exported source prototypes, 1=on, 0=off.')
+    parser.add_argument('--use_shape_consistency', type=int, default=1,
+                        help='SAAM-SPMM ablation: use soft shape consistency, 1=on, 0=off.')
+    parser.add_argument('--saam_metric', type=str, default='variance',
+                        choices=['variance', 'kl', 'entropy'],
+                        help='SAAM-SPMM stability metric.')
+    parser.add_argument('--stable_threshold', type=float, default=None,
+                        help='Optional SAAM-SPMM stability threshold. If unset, top-k stable pixels are used.')
+    parser.add_argument('--stable_topk_percent', type=float, default=0.3,
+                        help='Top-k stable pixel fraction for SAAM-SPMM.')
+    parser.add_argument('--unstable_weight', type=float, default=0.1,
+                        help='Weak supervision weight for unstable SAAM-SPMM pixels.')
+    parser.add_argument('--lambda_ent', type=float, default=1.0,
+                        help='SAAM-SPMM entropy loss weight.')
+    parser.add_argument('--lambda_proto', type=float, default=1.0,
+                        help='SAAM-SPMM prototype matching loss weight.')
+    parser.add_argument('--lambda_shape', type=float, default=0.1,
+                        help='SAAM-SPMM shape consistency loss weight.')
+    parser.add_argument('--lambda_cons', type=float, default=1.0,
+                        help='SAAM-SPMM multi-view consistency loss weight.')
+    parser.add_argument('--num_views', type=int, default=5,
+                        help='Number of SAAM-SPMM weak target views.')
+    parser.add_argument('--proto_momentum', type=float, default=0.9,
+                        help='EMA momentum for SAAM-SPMM target prototype memory.')
+    parser.add_argument('--proto_loss', type=str, default='cosine', choices=['cosine', 'mse'],
+                        help='SAAM-SPMM prototype loss type.')
+    parser.add_argument('--saam_spmm_update_scope', type=str, default='bn_affine',
+                        choices=['bn_affine', 'all'],
+                        help='Parameters updated by SAAM-SPMM.')
+    parser.add_argument('--source_prototype_path', type=str, default=None,
+                        help='Path to source prototypes for SAAM-SPMM or source prototype export.')
     parser.add_argument('--gtta_lr', type=float, default=2.5e-4,
                         help='Learning rate for GTTA supervised source and target pseudo-label updates.')
     parser.add_argument('--gtta_momentum', type=float, default=0.9,
@@ -733,6 +773,11 @@ def get_args():
         mode_tag = f"smppm_{args.smppm_ablation_mode}"
         if mode_tag not in args.expname:
             args.expname = f"{mode_tag}_{args.expname}"
+    if args.phase == 'test' and args.tta == 'saam_spmm':
+        if not any(arg == '--use_saam' or arg.startswith('--use_saam=') for arg in sys.argv):
+            args.use_saam = 1
+        if 'saam_spmm' not in args.expname:
+            args.expname = f"saam_spmm_{args.expname}"
     if args.phase == 'test' and args.tta == 'source_ce_only':
         args.smppm_ablation_mode = 'source_ce_only'
 
@@ -846,6 +891,34 @@ def get_args():
         raise ValueError("smppm_style_alpha must be in [0, 1]")
     if args.smppm_log_interval < 0:
         raise ValueError("smppm_log_interval must be >= 0")
+    if args.saam_spmm_lr <= 0:
+        raise ValueError(f"Invalid saam_spmm_lr={args.saam_spmm_lr}. Must be > 0")
+    if args.saam_spmm_weight_decay < 0:
+        raise ValueError("saam_spmm_weight_decay must be >= 0")
+    if args.use_stable_mask not in [0, 1]:
+        raise ValueError("use_stable_mask must be 0 or 1")
+    if args.use_source_anchor not in [0, 1]:
+        raise ValueError("use_source_anchor must be 0 or 1")
+    if args.use_shape_consistency not in [0, 1]:
+        raise ValueError("use_shape_consistency must be 0 or 1")
+    if args.stable_threshold is not None and not (0.0 <= args.stable_threshold <= 1.0):
+        raise ValueError("stable_threshold must be in [0, 1] when set")
+    if not (0.0 < args.stable_topk_percent <= 1.0):
+        raise ValueError("stable_topk_percent must be in (0, 1]")
+    if not (0.0 <= args.unstable_weight <= 1.0):
+        raise ValueError("unstable_weight must be in [0, 1]")
+    if args.lambda_ent < 0:
+        raise ValueError("lambda_ent must be >= 0")
+    if args.lambda_proto < 0:
+        raise ValueError("lambda_proto must be >= 0")
+    if args.lambda_shape < 0:
+        raise ValueError("lambda_shape must be >= 0")
+    if args.lambda_cons < 0:
+        raise ValueError("lambda_cons must be >= 0")
+    if args.num_views < 1:
+        raise ValueError("num_views must be >= 1")
+    if not (0.0 <= args.proto_momentum <= 1.0):
+        raise ValueError("proto_momentum must be in [0, 1]")
     if args.gtta_lr <= 0:
         raise ValueError(f"Invalid gtta_lr={args.gtta_lr}. Must be > 0")
     if args.gtta_momentum < 0:
@@ -1026,6 +1099,8 @@ def get_args():
         raise ValueError("a3_entropy_match_weight must be >= 0")
     if args.a3_ema_loss_weight < 0:
         raise ValueError("a3_ema_loss_weight must be >= 0")
+    if args.phase not in ['train', 'test', 'export_source_prototypes']:
+        raise ValueError("phase must be train, test, or export_source_prototypes")
     if args.phase != 'test' and args.tta != 'none':
         raise ValueError("TTA is only supported with --phase test in this DCON entry point.")
 
@@ -1061,6 +1136,11 @@ if __name__ == '__main__':
     snap_dir = os.path.join(exp_dir, 'snapshots')
     tbfile_dir = os.path.join(exp_dir, 'tboard')
     logdir = os.path.join(exp_dir, 'log')
+    if opt.source_prototype_path is None:
+        opt.source_prototype_path = os.path.join(
+            dn_dir,
+            f"source_prototypes_{opt.data_name}_{opt.tr_domain}.pt",
+        )
 
     print(f"\n{'='*80}")
     print(f"Checkpoint directory: {ckpt_dir}")
@@ -1211,6 +1291,29 @@ if __name__ == '__main__':
         logging.info("smppm_src_batch_size:"+str(opt.smppm_src_batch_size))
         logging.info("smppm_plain_source_loader:"+str(opt.smppm_plain_source_loader))
         logging.info("smppm_log_interval:"+str(opt.smppm_log_interval))
+    elif opt.tta == 'saam_spmm':
+        logging.info("=== SAAM-SPMM Configuration ===")
+        logging.info("SAAM-SPMM is target-only online TTA with optional pre-exported source prototypes; raw source images are not used during test.")
+        logging.info("saam_spmm_lr:"+str(opt.saam_spmm_lr))
+        logging.info("saam_spmm_weight_decay:"+str(opt.saam_spmm_weight_decay))
+        logging.info("saam_spmm_update_scope:"+str(opt.saam_spmm_update_scope))
+        logging.info("smppm_steps:"+str(opt.smppm_steps))
+        logging.info("num_views:"+str(opt.num_views))
+        logging.info("use_saam:"+str(opt.use_saam))
+        logging.info("use_stable_mask:"+str(opt.use_stable_mask))
+        logging.info("use_source_anchor:"+str(opt.use_source_anchor))
+        logging.info("use_shape_consistency:"+str(opt.use_shape_consistency))
+        logging.info("saam_metric:"+str(opt.saam_metric))
+        logging.info("stable_threshold:"+str(opt.stable_threshold))
+        logging.info("stable_topk_percent:"+str(opt.stable_topk_percent))
+        logging.info("unstable_weight:"+str(opt.unstable_weight))
+        logging.info("lambda_ent:"+str(opt.lambda_ent))
+        logging.info("lambda_proto:"+str(opt.lambda_proto))
+        logging.info("lambda_shape:"+str(opt.lambda_shape))
+        logging.info("lambda_cons:"+str(opt.lambda_cons))
+        logging.info("proto_momentum:"+str(opt.proto_momentum))
+        logging.info("proto_loss:"+str(opt.proto_loss))
+        logging.info("source_prototype_path:"+str(opt.source_prototype_path))
     elif opt.tta == 'gtta':
         logging.info("=== GTTA Configuration ===")
         logging.info("GTTA is source-dependent TTA: source labels supervise adaptation; target labels are evaluation-only.")
@@ -1487,6 +1590,13 @@ if __name__ == '__main__':
             f"with batch_size={source_train_batch_size}, shuffle=True, drop_last=True. "
             f"lambda_source={opt.lambda_source}. Target labels are not used for adaptation."
         )
+    elif opt.phase == 'export_source_prototypes':
+        source_train_batch_size = opt.smppm_src_batch_size
+        print(
+            "Source prototype export: using labeled source-domain training split "
+            f"with batch_size={source_train_batch_size}, shuffle=False, drop_last=False. "
+            f"Output path={opt.source_prototype_path}"
+        )
 
     needs_train_loader = (
         opt.phase != 'test'
@@ -1501,8 +1611,8 @@ if __name__ == '__main__':
             "dataset": train_loader_dataset,
             "num_workers": opt.num_workers,
             "batch_size": source_train_batch_size,
-            "shuffle": True,
-            "drop_last": True,
+            "shuffle": False if opt.phase == 'export_source_prototypes' else True,
+            "drop_last": False if opt.phase == 'export_source_prototypes' else True,
             "pin_memory": True,
         }
         if opt.num_workers > 0:
@@ -1525,6 +1635,50 @@ if __name__ == '__main__':
     trval_loader=DataLoader(dataset = tr_valset, **eval_loader_kwargs)
     trte_loader=DataLoader(dataset = tr_teset, **eval_loader_kwargs)
     test_loader = DataLoader(dataset = test_set, **eval_loader_kwargs)
+
+    # ========== SOURCE PROTOTYPE EXPORT MODE ==========
+    if opt.phase == 'export_source_prototypes':
+        if train_loader is None:
+            raise RuntimeError("Source prototype export requires a source training loader.")
+        if opt.resume_path is not None:
+            reload_model_fid = opt.resume_path
+        elif opt.resume_epoch is not None:
+            reload_model_fid = os.path.join(snap_dir, f'{opt.resume_epoch}_net_Seg.pth')
+        else:
+            ckpt_files = glob.glob(os.path.join(snap_dir, '*_net_Seg.pth'))
+            if not ckpt_files:
+                raise FileNotFoundError(
+                    f"No checkpoint found in {snap_dir}. Pass --restore_from for source prototype export."
+                )
+            reload_model_fid = max(ckpt_files, key=os.path.getctime)
+
+        print(f"\n{'='*80}")
+        print("SOURCE PROTOTYPE EXPORT MODE")
+        print(f"Loading checkpoint: {reload_model_fid}")
+        print(f"Saving prototypes to: {opt.source_prototype_path}")
+        print(f"{'='*80}\n")
+
+        if not os.path.exists(reload_model_fid):
+            raise FileNotFoundError(f"Checkpoint not found: {reload_model_fid}")
+
+        model = Train_process(opt, reloaddir=reload_model_fid, istest=1, source_loader=None)
+        device = next(model.netseg.parameters()).device
+        payload = export_source_prototypes(
+            model=model.netseg,
+            loader=train_loader,
+            num_classes=opt.nclass,
+            device=device,
+            save_path=opt.source_prototype_path,
+            data_name=opt.data_name,
+            tr_domain=opt.tr_domain,
+        )
+        print(
+            "Source prototype export completed: "
+            f"prototype_shape={tuple(payload['prototype'].shape)}, "
+            f"count={payload['count'].tolist()}"
+        )
+        exit(0)
+    # ========== END SOURCE PROTOTYPE EXPORT MODE ==========
 
     # ========== TEST MODE ==========
     if opt.phase == 'test':
@@ -1600,6 +1754,20 @@ if __name__ == '__main__':
                 f"steps={opt.smppm_steps}, src_batch_size={opt.smppm_src_batch_size}, "
                 f"plain_source_loader={opt.smppm_plain_source_loader}, "
                 f"log_interval={opt.smppm_log_interval}"
+            )
+        elif opt.tta == 'saam_spmm':
+            print(
+                "SAAM-SPMM config: target-only online TTA with optional source prototype anchors; "
+                "raw source images are not used during test-time adaptation. "
+                f"lr={opt.saam_spmm_lr}, steps={opt.smppm_steps}, scope={opt.saam_spmm_update_scope}, "
+                f"num_views={opt.num_views}, use_saam={opt.use_saam}, "
+                f"use_stable_mask={opt.use_stable_mask}, use_source_anchor={opt.use_source_anchor}, "
+                f"use_shape_consistency={opt.use_shape_consistency}, saam_metric={opt.saam_metric}, "
+                f"stable_threshold={opt.stable_threshold}, stable_topk_percent={opt.stable_topk_percent}, "
+                f"unstable_weight={opt.unstable_weight}, lambda_ent={opt.lambda_ent}, "
+                f"lambda_proto={opt.lambda_proto}, lambda_shape={opt.lambda_shape}, "
+                f"lambda_cons={opt.lambda_cons}, proto_loss={opt.proto_loss}, "
+                f"proto_momentum={opt.proto_momentum}, source_prototype_path={opt.source_prototype_path}"
             )
         elif opt.tta == 'gtta':
             print(

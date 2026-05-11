@@ -18,6 +18,7 @@ from .saam import StabilityAwareAlignmentModule, compute_saam_loss
 from .tta_asm import ASMAdapter
 from .tta_gtta import GTTAAdapter
 from .tta_smppm import SMPPMAdapter
+from .tta_saam_spmm import SAAMSPMMAdapter, configure_model_for_saam_spmm
 from tta_dg_tta import DGTTAAdapter
 from tta_memo import build_memo_batch, marginal_entropy
 from tta_gold import GOLDAdapter
@@ -399,6 +400,8 @@ class Train_process():
         self.smppm_optimizer = None
         self.smppm_adapter = None
         self.smppm_source_loader = source_loader
+        self.saam_spmm_optimizer = None
+        self.saam_spmm_adapter = None
         self.gtta_optimizer = None
         self.gtta_adapter = None
         self.gtta_source_loader = source_loader
@@ -455,6 +458,8 @@ class Train_process():
                     print("source_ce_only requested: call configure_smppm(source_loader) before te_func_smppm.")
                 else:
                     self.configure_smppm(source_loader)
+            elif self.tta_mode == 'saam_spmm':
+                self.configure_saam_spmm()
             elif self.tta_mode == 'gtta':
                 if source_loader is None:
                     print("GTTA requested: call configure_gtta(source_loader) before te_func_gtta.")
@@ -858,6 +863,64 @@ class Train_process():
             print(self.smppm_adapter.feature_summary())
         logger.info(msg)
         logger.info(self.smppm_adapter.feature_summary())
+
+    def configure_saam_spmm(self):
+        update_scope = getattr(self.opt, 'saam_spmm_update_scope', 'bn_affine')
+        params, names = configure_model_for_saam_spmm(self.netseg, update_scope=update_scope)
+        if len(params) == 0:
+            raise RuntimeError("SAAM-SPMM found no trainable parameters.")
+
+        self.saam_spmm_optimizer = torch.optim.Adam(
+            params,
+            lr=getattr(self.opt, 'saam_spmm_lr', 1e-4),
+            betas=(0.9, 0.999),
+            weight_decay=getattr(self.opt, 'saam_spmm_weight_decay', 0.0),
+        )
+        self.saam_spmm_adapter = SAAMSPMMAdapter(
+            model=self.netseg,
+            optimizer=self.saam_spmm_optimizer,
+            device=next(self.netseg.parameters()).device,
+            num_classes=self.n_cls,
+            steps=getattr(self.opt, 'smppm_steps', 1),
+            num_views=getattr(self.opt, 'num_views', 5),
+            use_saam=bool(getattr(self.opt, 'use_saam', 1)),
+            use_stable_mask=bool(getattr(self.opt, 'use_stable_mask', 1)),
+            use_source_anchor=bool(getattr(self.opt, 'use_source_anchor', 1)),
+            use_shape_consistency=bool(getattr(self.opt, 'use_shape_consistency', 1)),
+            source_prototype_path=getattr(self.opt, 'source_prototype_path', None),
+            saam_metric=getattr(self.opt, 'saam_metric', 'variance'),
+            stable_threshold=getattr(self.opt, 'stable_threshold', None),
+            stable_topk_percent=getattr(self.opt, 'stable_topk_percent', 0.3),
+            unstable_weight=getattr(self.opt, 'unstable_weight', 0.1),
+            lambda_ent=getattr(self.opt, 'lambda_ent', 1.0),
+            lambda_proto=getattr(self.opt, 'lambda_proto', 1.0),
+            lambda_shape=getattr(self.opt, 'lambda_shape', 0.1),
+            lambda_cons=getattr(self.opt, 'lambda_cons', 1.0),
+            proto_momentum=getattr(self.opt, 'proto_momentum', 0.9),
+            proto_loss=getattr(self.opt, 'proto_loss', 'cosine'),
+            log_interval=getattr(self.opt, 'smppm_log_interval', 1),
+        )
+
+        msg = (
+            "SAAM-SPMM enabled: source-prototype-assisted target-only online TTA. "
+            "No source images are read during test-time adaptation. "
+            f"scope={update_scope}, lr={getattr(self.opt, 'saam_spmm_lr', 1e-4)}, "
+            f"steps={getattr(self.opt, 'smppm_steps', 1)}, "
+            f"num_views={getattr(self.opt, 'num_views', 5)}, "
+            f"use_saam={getattr(self.opt, 'use_saam', 1)}, "
+            f"use_stable_mask={getattr(self.opt, 'use_stable_mask', 1)}, "
+            f"use_source_anchor={getattr(self.opt, 'use_source_anchor', 1)}, "
+            f"use_shape_consistency={getattr(self.opt, 'use_shape_consistency', 1)}, "
+            f"source_prototype_path={getattr(self.opt, 'source_prototype_path', None)}, "
+            f"trainable_tensors={len(names)}"
+        )
+        if not getattr(self.opt, 'quiet_console', False):
+            print(msg)
+            print(self.saam_spmm_adapter.feature_summary())
+        logger.info(msg)
+        logger.info(self.saam_spmm_adapter.feature_summary())
+        for name in names:
+            logger.info(f"  SAAM-SPMM trainable: {name}")
 
     def configure_gtta(self, source_loader=None):
         if source_loader is None:
@@ -1643,6 +1706,31 @@ class Train_process():
         return self.input_mask_te, seg
 
     @torch.enable_grad()
+    def te_func_saam_spmm(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        # Target labels are returned for evaluation only. SAAM-SPMM adaptation
+        # uses target predictions/features and optional pre-exported source
+        # prototypes, never raw source images and never target labels.
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.saam_spmm_adapter is None:
+            raise RuntimeError("SAAM-SPMM adapter is not initialized. Call configure_saam_spmm() first.")
+
+        logits = self.saam_spmm_adapter.forward(self.input_img_te)
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_saam_spmm_losses = self.saam_spmm_adapter.last_losses
+        return self.input_mask_te, seg
+
+    @torch.enable_grad()
     def te_func_gtta(self, input):
         self.input_img_te = input['image'].float().cuda()
         # This label is returned for evaluation only. GTTA adaptation below uses
@@ -1845,6 +1933,8 @@ class Train_process():
             return self.te_func_asm(input)
         if tta_mode in ['sm_ppm', 'source_ce_only']:
             return self.te_func_smppm(input)
+        if tta_mode == 'saam_spmm':
+            return self.te_func_saam_spmm(input)
         if tta_mode == 'gtta':
             return self.te_func_gtta(input)
         if tta_mode == 'gold':

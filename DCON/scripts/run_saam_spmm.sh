@@ -46,6 +46,8 @@ LAMBDA_CONS=${LAMBDA_CONS:-1.0}
 PROTO_MOMENTUM=${PROTO_MOMENTUM:-0.9}
 PROTO_LOSS=${PROTO_LOSS:-cosine}
 LOG_INTERVAL=${LOG_INTERVAL:-1}
+PAIR_FILTER=${PAIR_FILTER:-}
+SKIP_FINISHED=${SKIP_FINISHED:-false}
 
 SAAM_SPMM_ABLATION_MODE=${SAAM_SPMM_ABLATION_MODE:-all}
 if [ "${SAAM_SPMM_ABLATION_MODE}" = "all" ]; then
@@ -105,6 +107,7 @@ run_one() {
   local target=$6
   local ckpt=$7
   local proto_path
+  local expname
   proto_path="$(prototype_path "${data_name}" "${source}")"
 
   echo "=========================================="
@@ -112,9 +115,14 @@ run_one() {
   echo "=========================================="
 
   if [ "${mode}" = "baseline" ]; then
+    expname="baseline_smppm_${expname_base}"
+    if [ "${SKIP_FINISHED}" = "true" ] && grep -q "Overall mean dice by domain" "${RESULTS_DIR}/${source}/${expname}/log/out.csv" 2>/dev/null; then
+      echo "Skip finished run: ${RESULTS_DIR}/${source}/${expname}"
+      return 0
+    fi
     "${PYTHON_BIN}" train.py \
       --phase test \
-      --expname "baseline_smppm_${expname_base}" \
+      --expname "${expname}" \
       --ckpt_dir "${RESULTS_DIR}" \
       --dataset "${data_name}" \
       --nclass "${nclass}" \
@@ -162,6 +170,12 @@ run_one() {
       ;;
   esac
 
+  expname="saam_spmm_${mode}_${expname_base}"
+  if [ "${SKIP_FINISHED}" = "true" ] && grep -q "Overall mean dice by domain" "${RESULTS_DIR}/${source}/${expname}/log/out.csv" 2>/dev/null; then
+    echo "Skip finished run: ${RESULTS_DIR}/${source}/${expname}"
+    return 0
+  fi
+
   if [ "${use_source_anchor}" = "1" ] && [ ! -f "${proto_path}" ]; then
     echo "Missing source prototype file: ${proto_path}" >&2
     echo "Run with EXPORT_PROTOTYPES=true or export it manually first." >&2
@@ -170,7 +184,7 @@ run_one() {
 
   "${PYTHON_BIN}" train.py \
     --phase test \
-    --expname "saam_spmm_${mode}_${expname_base}" \
+    --expname "${expname}" \
     --ckpt_dir "${RESULTS_DIR}" \
     --dataset "${data_name}" \
     --nclass "${nclass}" \
@@ -215,9 +229,24 @@ pairs=(
   "dcon_lb_bssfp CARDIAC 4 LGE bSSFP ../ckpts/dcon-lb-500.pth"
 )
 
+pair_matches_filter() {
+  local expname=$1
+  local data_name=$2
+  local source=$3
+  local target=$4
+  if [ -z "${PAIR_FILTER}" ]; then
+    return 0
+  fi
+  local haystack="${expname} ${data_name} ${source} ${target} ${source}_${target} ${source}->${target}"
+  [[ "${haystack}" == *"${PAIR_FILTER}"* ]]
+}
+
 if [ "${EXPORT_PROTOTYPES}" = "true" ]; then
   for pair in "${pairs[@]}"; do
     read -r expname data_name nclass source target ckpt <<< "${pair}"
+    if ! pair_matches_filter "${expname}" "${data_name}" "${source}" "${target}"; then
+      continue
+    fi
     export_prototypes "${data_name}" "${nclass}" "${source}" "${ckpt}"
   done
 fi
@@ -225,6 +254,9 @@ fi
 for mode in "${ABLATION_MODES[@]}"; do
   for pair in "${pairs[@]}"; do
     read -r expname data_name nclass source target ckpt <<< "${pair}"
+    if ! pair_matches_filter "${expname}" "${data_name}" "${source}" "${target}"; then
+      continue
+    fi
     run_one "${mode}" "${expname}" "${data_name}" "${nclass}" "${source}" "${target}" "${ckpt}"
   done
 done

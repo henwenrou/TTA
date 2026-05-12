@@ -222,6 +222,22 @@ python3 scripts/visualize_volume_predictions.py \
   --volume-dir <result_root>/<source>/<expname>/log/volumes
 ```
 
+To generate visualization outputs for all four bundled DCON shifts in one shot:
+
+```bash
+RESULTS_DIR=results_vis METHOD=none bash scripts/visualize_all_four_tasks.sh
+```
+
+This writes four task folders under:
+
+```text
+<result_root>/visualization/
+  SABSCT_to_CHAOST2/
+  CHAOST2_to_SABSCT/
+  bSSFP_to_LGE/
+  LGE_to_bSSFP/
+```
+
 Summarize existing results:
 
 ```bash

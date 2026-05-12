@@ -1,0 +1,9 @@
+{
+  "classes": [
+    {"id": 1, "name": "LV", "cardiac": true},
+    {"id": 2, "name": "Myo", "cardiac": true},
+    {"id": 3, "name": "RV", "cardiac": true, "small": true}
+  ],
+  "small_organ_ids": [3],
+  "cardiac_class_ids": [1, 2, 3]
+}

@@ -1,0 +1,10 @@
+{
+  "classes": [
+    {"id": 1, "name": "liver"},
+    {"id": 2, "name": "right_kidney", "small": true},
+    {"id": 3, "name": "left_kidney", "small": true},
+    {"id": 4, "name": "spleen", "small": true}
+  ],
+  "small_organ_ids": [2, 3, 4],
+  "cardiac_class_ids": []
+}

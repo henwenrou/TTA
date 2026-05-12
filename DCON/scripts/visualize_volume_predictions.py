@@ -74,6 +74,24 @@ def parse_args() -> argparse.Namespace:
         help="Number of worst slices to include in the global error board.",
     )
     parser.add_argument(
+        "--global-sort",
+        choices=("worst", "scan_asc", "scan_desc", "z_asc", "z_desc"),
+        default="worst",
+        help=(
+            "Ordering of rows in global_worst_slices.png. "
+            "'worst' keeps the previous behavior; other modes sort by scan/z order."
+        ),
+    )
+    parser.add_argument(
+        "--scan-id",
+        nargs="+",
+        default=None,
+        help=(
+            "Only visualize the specified scan ids, for example: "
+            "--scan-id CHAOST2_6 CHAOST2_13"
+        ),
+    )
+    parser.add_argument(
         "--skip-all-empty-in-global",
         action="store_true",
         help="Exclude slices with empty GT and empty prediction from the global worst-slice board.",
@@ -107,6 +125,16 @@ def discover_scans(volume_dir: Path) -> Dict[str, Dict[str, Path]]:
         )
         raise FileNotFoundError(f"Incomplete scan triplets in {volume_dir}: {details}")
     return scans
+
+
+def parse_scan_key(scan_id: str) -> Tuple[str, int | str]:
+    if "_" not in scan_id:
+        return scan_id, scan_id
+    prefix, suffix = scan_id.rsplit("_", 1)
+    try:
+        return prefix, int(suffix)
+    except ValueError:
+        return prefix, suffix
 
 
 def normalize_image_slice(image_slice: np.ndarray) -> np.ndarray:
@@ -286,6 +314,7 @@ def build_global_overview(
     rows: Sequence[Dict[str, object]],
     output_path: Path,
     tile_size: int,
+    title: str,
 ) -> None:
     if not rows:
         return
@@ -297,11 +326,7 @@ def build_global_overview(
     height = pad + header_h + len(rows) * (row_title_h + tile_size + pad)
     board = Image.new("RGB", (width, height), color=(252, 248, 246))
     draw = ImageDraw.Draw(board)
-    draw_text(
-        draw,
-        (pad, pad),
-        "Worst slices by mean_class_dice | left=GT overlay | right=Pred overlay",
-    )
+    draw_text(draw, (pad, pad), title)
 
     y = pad + header_h
     for row in rows:
@@ -346,6 +371,15 @@ def main() -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     scans = discover_scans(volume_dir)
+    if args.scan_id:
+        selected = set(args.scan_id)
+        scans = {scan_id: parts for scan_id, parts in scans.items() if scan_id in selected}
+        missing = sorted(selected - set(scans.keys()))
+        if missing:
+            raise ValueError(f"Requested scan ids not found in {volume_dir}: {missing}")
+        if not scans:
+            raise ValueError("No scans left after applying --scan-id filter.")
+
     case_csv_rows: List[Dict[str, object]] = []
     slice_csv_rows: List[Dict[str, object]] = []
     global_rows: List[Dict[str, object]] = []
@@ -407,17 +441,38 @@ def main() -> None:
     save_csv(output_dir / "case_metrics.csv", case_csv_rows)
     save_csv(output_dir / "slice_metrics.csv", slice_csv_rows)
 
-    global_rows.sort(
-        key=lambda row: (
-            float(row["metrics"]["mean_class_dice"]),
-            float(row["metrics"]["fg_dice"]),
-            -float(row["metrics"]["fp_pixels"] + row["metrics"]["fn_pixels"]),
+    if args.global_sort == "worst":
+        global_rows.sort(
+            key=lambda row: (
+                float(row["metrics"]["mean_class_dice"]),
+                float(row["metrics"]["fg_dice"]),
+                -float(row["metrics"]["fp_pixels"] + row["metrics"]["fn_pixels"]),
+            )
         )
-    )
+        global_title = "Worst slices by mean_class_dice | left=GT overlay | right=Pred overlay"
+        global_rows_to_render = global_rows[: args.worst_k]
+    elif args.global_sort == "scan_asc":
+        global_rows.sort(key=lambda row: (parse_scan_key(str(row["scan_id"])), int(row["z_id"])))
+        global_title = "Slices sorted by scan asc, z asc | left=GT overlay | right=Pred overlay"
+        global_rows_to_render = global_rows
+    elif args.global_sort == "scan_desc":
+        global_rows.sort(key=lambda row: (parse_scan_key(str(row["scan_id"])), int(row["z_id"])), reverse=True)
+        global_title = "Slices sorted by scan desc, z desc | left=GT overlay | right=Pred overlay"
+        global_rows_to_render = global_rows
+    elif args.global_sort == "z_asc":
+        global_rows.sort(key=lambda row: (int(row["z_id"]), parse_scan_key(str(row["scan_id"]))))
+        global_title = "Slices sorted by z asc, scan asc | left=GT overlay | right=Pred overlay"
+        global_rows_to_render = global_rows
+    else:
+        global_rows.sort(key=lambda row: (int(row["z_id"]), parse_scan_key(str(row["scan_id"]))), reverse=True)
+        global_title = "Slices sorted by z desc, scan desc | left=GT overlay | right=Pred overlay"
+        global_rows_to_render = global_rows
+
     build_global_overview(
-        rows=global_rows[: args.worst_k],
+        rows=global_rows_to_render,
         output_path=output_dir / "global_worst_slices.png",
         tile_size=args.tile_size,
+        title=global_title,
     )
 
     print(f"Visualization completed. Output written to: {output_dir}")

@@ -12,7 +12,9 @@ METHOD="${METHOD:-none}"
 TILE_SIZE="${TILE_SIZE:-224}"
 ALPHA="${ALPHA:-0.45}"
 WORST_K="${WORST_K:-24}"
+GLOBAL_SORT="${GLOBAL_SORT:-worst}"
 SKIP_ALL_EMPTY_IN_GLOBAL="${SKIP_ALL_EMPTY_IN_GLOBAL:-1}"
+SCAN_IDS="${SCAN_IDS:-}"
 
 TASKS=(
   "SABSCT none_dcon_sabsct_to_chaost2 SABSCT_to_CHAOST2"
@@ -53,10 +55,18 @@ for item in "${TASKS[@]}"; do
     --tile-size "${TILE_SIZE}"
     --alpha "${ALPHA}"
     --worst-k "${WORST_K}"
+    --global-sort "${GLOBAL_SORT}"
   )
 
   if [ "${SKIP_ALL_EMPTY_IN_GLOBAL}" = "1" ]; then
     cmd+=(--skip-all-empty-in-global)
+  fi
+
+  if [ -n "${SCAN_IDS}" ]; then
+    # SCAN_IDS is a space-separated list, for example: "CHAOST2_6 CHAOST2_13"
+    # shellcheck disable=SC2206
+    scan_id_array=(${SCAN_IDS})
+    cmd+=(--scan-id "${scan_id_array[@]}")
   fi
 
   echo "=========================================="

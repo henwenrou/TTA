@@ -222,6 +222,20 @@ python3 scripts/visualize_volume_predictions.py \
   --volume-dir <result_root>/<source>/<expname>/log/volumes
 ```
 
+Useful variants:
+
+```bash
+# Sort the global board by scan order instead of worst Dice.
+python3 scripts/visualize_volume_predictions.py \
+  --volume-dir <result_root>/<source>/<expname>/log/volumes \
+  --global-sort scan_asc
+
+# Only visualize specific files / scan ids.
+python3 scripts/visualize_volume_predictions.py \
+  --volume-dir <result_root>/<source>/<expname>/log/volumes \
+  --scan-id CHAOST2_6 CHAOST2_13
+```
+
 To generate visualization outputs for all four bundled DCON shifts in one shot:
 
 ```bash

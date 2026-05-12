@@ -17,6 +17,7 @@ from failure_common import (
     binary_metrics,
     cast_mask,
     component_metrics,
+    discover_volume_triplets,
     ensure_parent,
     entropy_metrics,
     foreground_component_count,
@@ -36,8 +37,14 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compute slice-wise, case-wise, and class-wise failure metrics."
     )
-    parser.add_argument("--pred_dir", required=True, type=Path, help="Directory with prediction masks.")
-    parser.add_argument("--gt_dir", required=True, type=Path, help="Directory with ground-truth masks.")
+    parser.add_argument(
+        "--volume_dir",
+        default=None,
+        type=Path,
+        help="Optional directory with <case>_image.nii.gz, <case>_gt.nii.gz, and <case>_pred.nii.gz.",
+    )
+    parser.add_argument("--pred_dir", default=None, type=Path, help="Directory with prediction masks.")
+    parser.add_argument("--gt_dir", default=None, type=Path, help="Directory with ground-truth masks.")
     parser.add_argument("--image_dir", default=None, type=Path, help="Optional directory with images.")
     parser.add_argument("--entropy_dir", default=None, type=Path, help="Optional directory with entropy maps.")
     parser.add_argument("--dataset", required=True, help="Dataset name, e.g. abdominal or cardiac.")
@@ -115,6 +122,8 @@ def analyze_case(
     case_id: str,
     pred_path: Path,
     gt_path: Path,
+    image_path: Optional[Path],
+    entropy_path: Optional[Path],
     image_dir: Optional[Path],
     entropy_dir: Optional[Path],
     dataset: str,
@@ -128,8 +137,13 @@ def analyze_case(
 
     pred = cast_mask(normalize_volume_shape(read_array(pred_path)))
     gt = cast_mask(normalize_volume_shape(read_array(gt_path)))
-    image_path = optional_case_path(image_dir, case_id)
-    entropy = load_optional_volume(entropy_dir, case_id)
+    if image_path is None:
+        image_path = optional_case_path(image_dir, case_id)
+    entropy = (
+        normalize_volume_shape(read_array(entropy_path))
+        if entropy_path is not None
+        else load_optional_volume(entropy_dir, case_id)
+    )
     validate_shapes(case_id, pred, gt, entropy)
 
     rows: List[Dict[str, object]] = []
@@ -207,13 +221,34 @@ def main() -> None:
         cardiac_class_ids=parse_int_set(args.cardiac_class_ids),
     )
 
+    if args.volume_dir is None and (args.pred_dir is None or args.gt_dir is None):
+        raise ValueError("Provide either --volume_dir or both --pred_dir and --gt_dir.")
+    if args.volume_dir is not None:
+        cases = [
+            (
+                case_id,
+                parts["pred"],
+                parts["gt"],
+                parts.get("image"),
+                parts.get("entropy"),
+            )
+            for case_id, parts in discover_volume_triplets(args.volume_dir).items()
+        ]
+    else:
+        cases = [
+            (case_id, pred_path, gt_path, None, None)
+            for case_id, pred_path, gt_path in paired_cases(args.pred_dir, args.gt_dir)
+        ]
+
     rows: List[Dict[str, object]] = []
-    for case_id, pred_path, gt_path in paired_cases(args.pred_dir, args.gt_dir):
+    for case_id, pred_path, gt_path, image_path, entropy_path in cases:
         rows.extend(
             analyze_case(
                 case_id=case_id,
                 pred_path=pred_path,
                 gt_path=gt_path,
+                image_path=image_path,
+                entropy_path=entropy_path,
                 image_dir=args.image_dir,
                 entropy_dir=args.entropy_dir,
                 dataset=args.dataset,

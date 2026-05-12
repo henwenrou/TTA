@@ -214,6 +214,41 @@ def paired_cases(pred_dir: Path, gt_dir: Path) -> List[Tuple[str, Path, Path]]:
     return [(case_id, pred_files[case_id], gt_files[case_id]) for case_id in shared]
 
 
+def discover_volume_triplets(volume_dir: Path) -> Dict[str, Dict[str, Path]]:
+    """Discover <case>_image/_gt/_pred triplets from one visualization volume directory."""
+
+    cases: Dict[str, Dict[str, Path]] = {}
+    for path in sorted(volume_dir.iterdir()):
+        if not path.is_file():
+            continue
+        lowered = path.name.lower()
+        if not any(lowered.endswith(ext) for ext in IMAGE_EXTENSIONS):
+            continue
+        case_id = strip_known_suffix(path.name)
+        if "_pred." in lowered or lowered.endswith("_pred.nii.gz") or lowered.endswith("_prediction.nii.gz"):
+            role = "pred"
+        elif "_gt." in lowered or lowered.endswith("_gt.nii.gz"):
+            role = "gt"
+        elif "_label." in lowered or lowered.endswith("_label.nii.gz"):
+            role = "gt"
+        elif "_image." in lowered or lowered.endswith("_image.nii.gz"):
+            role = "image"
+        elif "_entropy." in lowered or lowered.endswith("_entropy.nii.gz"):
+            role = "entropy"
+        else:
+            continue
+        cases.setdefault(case_id, {})[role] = path
+
+    complete = {
+        case_id: parts
+        for case_id, parts in cases.items()
+        if "pred" in parts and "gt" in parts
+    }
+    if not complete:
+        raise FileNotFoundError(f"No _pred/_gt volume pairs found in {volume_dir}")
+    return dict(sorted(complete.items()))
+
+
 def optional_case_path(directory: Optional[Path], case_id: str) -> Optional[Path]:
     """Find an optional image or entropy file matching a case id."""
 

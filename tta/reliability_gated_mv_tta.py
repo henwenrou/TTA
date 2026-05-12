@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import glob
 import os
 import random
 import sys
@@ -137,19 +138,80 @@ def make_dcon_opt(args: argparse.Namespace, data_name: str, source: str, target:
     )
 
 
+def _dedupe_paths(paths: Sequence[Path]) -> List[Path]:
+    """Return paths with duplicates removed while preserving order."""
+
+    seen = set()
+    out = []
+    for path in paths:
+        key = str(path.resolve()) if path.exists() else str(path.absolute())
+        if key not in seen:
+            seen.add(key)
+            out.append(path)
+    return out
+
+
+def _domain_image_pattern(data_root: Path, data_name: str, domain: str) -> str:
+    """Return the DCON image glob used to validate a dataset root."""
+
+    if data_name == "ABDOMINAL":
+        return str(data_root / "abdominal" / domain / "processed" / "image_*.nii.gz")
+    if data_name == "CARDIAC":
+        return str(data_root / "cardiac" / "processed" / domain / "image_*.nii.gz")
+    raise ValueError(data_name)
+
+
+def resolve_data_root(data_root_arg: str, data_name: str, target: str) -> Path:
+    """Resolve data root for both repo-root and DCON-directory workflows."""
+
+    raw = Path(data_root_arg).expanduser()
+    if raw.is_absolute():
+        candidates = [raw]
+    else:
+        candidates = [
+            Path.cwd() / raw,
+            ROOT / raw,
+            DCON_ROOT / raw,
+        ]
+    candidates = _dedupe_paths(candidates)
+
+    checked = []
+    for candidate in candidates:
+        pattern = _domain_image_pattern(candidate, data_name, target)
+        checked.append(pattern)
+        if glob.glob(pattern):
+            return candidate.resolve()
+
+    checked_text = "\n  - ".join(checked)
+    raise FileNotFoundError(
+        "No target images were found for this reliability TTA run. "
+        "This is the cause of the previous ZeroDivisionError in DCON normalization.\n"
+        f"dataset={data_name}, target={target}, --data_root={data_root_arg}\n"
+        "Checked:\n"
+        f"  - {checked_text}\n"
+        "If you usually run from DCON/, either run the DCON wrapper or pass "
+        "--data_root DCON/data from the repo root."
+    )
+
+
 def build_dataset(args: argparse.Namespace, data_name: str, source: str, target: str):
     """Build the target-domain DCON test dataset and label names."""
 
-    os.environ["SAA_DATA_ROOT"] = str(Path(args.data_root).resolve())
+    resolved_data_root = resolve_data_root(args.data_root, data_name, target)
+    os.environ["SAA_DATA_ROOT"] = str(resolved_data_root)
     if data_name == "ABDOMINAL":
         import dataloaders.AbdominalDataset as ABD
 
+        ABD.DATA_ROOT = str(resolved_data_root)
+        ABD.BASEDIR = str(resolved_data_root / "abdominal")
         opt = make_dcon_opt(args, data_name, source, target, nclass=len(ABD.LABEL_NAME))
         dataset = ABD.get_test(modality=[target], norm_func=None, opt=opt)
         return dataset, ABD.LABEL_NAME, opt
     if data_name == "CARDIAC":
         import dataloaders.CardiacDataset as cardiac_cls
 
+        cardiac_cls.DATA_ROOT = str(resolved_data_root)
+        cardiac_cls.BASEDIR = str(resolved_data_root / "cardiac")
         opt = make_dcon_opt(args, data_name, source, target, nclass=len(cardiac_cls.LABEL_NAME))
         dataset = cardiac_cls.get_test(modality=[target], opt=opt)
         return dataset, cardiac_cls.LABEL_NAME, opt

@@ -1,0 +1,8 @@
+[submodule "MedSeg-TTA"]
+	ignore = dirty
+[submodule "SPMO-TTA"]
+	ignore = dirty
+[submodule "SicTTA"]
+	ignore = dirty
+[submodule "VPTTA"]
+	ignore = dirty

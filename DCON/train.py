@@ -22,6 +22,7 @@ import os.path as osp
 import glob
 import sys
 from PIL import Image
+import SimpleITK as sitk
 from models.exp_trainer import *
 from utils.prototype import export_source_prototypes
 
@@ -32,6 +33,7 @@ import logging
 from datetime import datetime
 import dataloaders.AbdominalDataset as ABD
 import dataloaders.CardiacDataset as cardiac_cls
+import dataloaders.niftiio as nio
 try:
     import dataloaders.ProstateDataset as PROS
 except ImportError:
@@ -54,6 +56,44 @@ def deal_wit_lbvis(tmp_mp,x,ncls):
     for i in range(ncls):
         y[x==i]=tmp_mp[str(i)]
     return y
+
+
+def _resolve_scan_files(dataset, scan_id_full):
+    """Resolve image/label file paths for a reconstructed scan id."""
+    domain, pid = scan_id_full.split("_", 1)
+    sample = dataset.sample_list[domain][pid]
+    return sample["img_fid"], sample["lbs_fid"]
+
+
+def save_prediction_volumes(savdir, vol_list, dataset):
+    """Persist full-volume image/gt/pred NIfTI files for downstream analysis."""
+    volume_dir = os.path.join(savdir, "volumes")
+    os.makedirs(volume_dir, exist_ok=True)
+
+    for scan_id_full, comp in vol_list.items():
+        img_fid, lb_fid = _resolve_scan_files(dataset, scan_id_full)
+        img_np, peeled_info = nio.read_nii_bysitk(img_fid, peel_info=True)
+        gt_np = nio.read_nii_bysitk(lb_fid)
+        pred_np = comp["pred"].detach().cpu().numpy().astype(np.uint8)
+
+        if pred_np.shape != gt_np.shape:
+            raise ValueError(
+                f"Prediction shape mismatch for {scan_id_full}: "
+                f"pred={pred_np.shape}, gt={gt_np.shape}"
+            )
+
+        sitk.WriteImage(
+            nio.convert_to_sitk(np.asarray(img_np, dtype=np.float32), peeled_info),
+            os.path.join(volume_dir, f"{scan_id_full}_image.nii.gz"),
+        )
+        sitk.WriteImage(
+            nio.convert_to_sitk(np.asarray(gt_np, dtype=np.uint8), peeled_info),
+            os.path.join(volume_dir, f"{scan_id_full}_gt.nii.gz"),
+        )
+        sitk.WriteImage(
+            nio.convert_to_sitk(pred_np, peeled_info),
+            os.path.join(volume_dir, f"{scan_id_full}_pred.nii.gz"),
+        )
 
 def prediction_wrapper(tb_writer,type1,savdir,model, test_loader,  epoch, label_name, save_prediction ):
     with torch.no_grad():
@@ -95,6 +135,9 @@ def prediction_wrapper(tb_writer,type1,savdir,model, test_loader,  epoch, label_
         print("=======  Epoch {} test result on mode {} seg:  =======".format(epoch, type1))
 
         eval_list_wrapper(tb_writer,epoch,type1,savdir,out_prediction_list,  model, label_name)
+
+        if save_prediction:
+            save_prediction_volumes(savdir, out_prediction_list, test_loader.dataset)
 
         if not save_prediction: 
             del out_prediction_list

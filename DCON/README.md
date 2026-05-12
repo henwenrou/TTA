@@ -206,6 +206,22 @@ RESULTS_DIR=results_full EVAL_SOURCE_DOMAIN=true SAVE_PREDICTION=true \
 bash scripts/run_medseg_tta_dcon.sh
 ```
 
+When `SAVE_PREDICTION=true`, each run now also writes full-volume
+`<scan_id>_image.nii.gz`, `<scan_id>_gt.nii.gz`, and `<scan_id>_pred.nii.gz`
+files under:
+
+```text
+<result_root>/<source>/<expname>/log/volumes/
+```
+
+You can then generate slice-wise GT/pred overlay boards, per-slice metrics, and
+a global worst-slice error-analysis board with:
+
+```bash
+python3 scripts/visualize_volume_predictions.py \
+  --volume-dir <result_root>/<source>/<expname>/log/volumes
+```
+
 Summarize existing results:
 
 ```bash

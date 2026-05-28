@@ -87,6 +87,8 @@ class GraTaAdapter:
         self.episodic = bool(episodic)
         self.init_lr = self.base_optimizer.param_groups[0]["lr"]
         self.source_state = deepcopy(self.model.state_dict())
+        self._old_params = {}
+        self._aux_grads = {}
         self.last_losses = {}
 
         supported = {"ent", "consis"}
@@ -104,6 +106,8 @@ class GraTaAdapter:
     def reset(self):
         self.model.load_state_dict(self.source_state, strict=True)
         self.base_optimizer.state.clear()
+        self._old_params.clear()
+        self._aux_grads.clear()
 
     def _loss(self, images, loss_name):
         if loss_name == "ent":
@@ -139,20 +143,19 @@ class GraTaAdapter:
 
     @torch.no_grad()
     def _store_and_subtract_grad(self):
+        self._old_params.clear()
+        self._aux_grads.clear()
         for param in self.params:
             if param.grad is None:
                 continue
-            state = self.base_optimizer.state[param]
-            state["grata_old_p"] = param.data.clone()
-            state["grata_aux_g"] = param.grad.detach().clone()
+            self._old_params[param] = param.data.clone()
+            self._aux_grads[param] = param.grad.detach().clone()
             param.data.sub_(param.grad)
 
     @torch.no_grad()
     def _restore_params(self):
-        for param in self.params:
-            state = self.base_optimizer.state[param]
-            if "grata_old_p" in state:
-                param.data.copy_(state["grata_old_p"])
+        for param, old_param in self._old_params.items():
+            param.data.copy_(old_param)
 
     @torch.no_grad()
     def _grad_norm(self, key=None):
@@ -161,7 +164,9 @@ class GraTaAdapter:
             if key is None:
                 grad = param.grad
             else:
-                grad = self.base_optimizer.state[param].get(key, None)
+                if key != "grata_aux_g":
+                    raise ValueError(f"Unsupported GraTa gradient cache key: {key}")
+                grad = self._aux_grads.get(param, None)
             if grad is not None:
                 vals.append(grad.norm(p=2))
         if len(vals) == 0:
@@ -172,7 +177,7 @@ class GraTaAdapter:
     def _cosine(self):
         inner = torch.zeros((), device=self.device)
         for param in self.params:
-            aux_grad = self.base_optimizer.state[param].get("grata_aux_g", None)
+            aux_grad = self._aux_grads.get(param, None)
             if aux_grad is None or param.grad is None:
                 continue
             inner = inner + torch.sum(aux_grad.to(param.grad.device) * param.grad.detach()).to(self.device)

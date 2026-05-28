@@ -164,7 +164,7 @@ class ConvD(nn.Module):
         self.bn3   = normalization(planes, norm)
         self.maxpool2D = nn.MaxPool2d(kernel_size=2)
 
-        if activation == 'relu':
+        if activation == 'relu': 
             self.activation = nn.ReLU(inplace=True)
         else:
             self.activation = nn.LeakyReLU(0.01, inplace=True)

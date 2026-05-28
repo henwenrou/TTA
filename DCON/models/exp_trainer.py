@@ -19,6 +19,7 @@ from .tta_asm import ASMAdapter
 from .tta_gtta import GTTAAdapter
 from .tta_smppm import SMPPMAdapter
 from .tta_saam_spmm import SAAMSPMMAdapter, configure_model_for_saam_spmm
+from .tta_source_proto_calib import SourcePrototypeLogitCalibrationAdapter
 from tta_dg_tta import DGTTAAdapter
 from tta_memo import build_memo_batch, marginal_entropy
 from tta_gold import GOLDAdapter
@@ -38,6 +39,7 @@ from tta_sictta import SicTTAAdapter, configure_model_for_sictta
 from tta_samtta import SAMTTAAdapter, SAMTTABezierTransform, configure_model_for_samtta
 from tta_a3_tta import A3TTAAdapter, configure_model_for_a3_tta
 from tta_spmo import SPMOAdapter
+from tta_grata import GraTaAdapter
 import sys
 sys.path.append('..')
 from dataloaders.rccs import ProRandConvNet, RandomConvCandidateSelection, RCCSFeatureEncoder
@@ -402,6 +404,7 @@ class Train_process():
         self.smppm_source_loader = source_loader
         self.saam_spmm_optimizer = None
         self.saam_spmm_adapter = None
+        self.source_proto_calib_adapter = None
         self.gtta_optimizer = None
         self.gtta_adapter = None
         self.gtta_source_loader = source_loader
@@ -424,6 +427,8 @@ class Train_process():
         self.sictta_adapter = None
         self.a3_optimizer = None
         self.a3_adapter = None
+        self.grata_optimizer = None
+        self.grata_adapter = None
         if istest == 1:
             if self.tta_mode == 'tent':
                 self.configure_tent()
@@ -460,6 +465,8 @@ class Train_process():
                     self.configure_smppm(source_loader)
             elif self.tta_mode == 'saam_spmm':
                 self.configure_saam_spmm()
+            elif self.tta_mode == 'source_proto_calib':
+                self.configure_source_proto_calib()
             elif self.tta_mode == 'gtta':
                 if source_loader is None:
                     print("GTTA requested: call configure_gtta(source_loader) before te_func_gtta.")
@@ -479,6 +486,8 @@ class Train_process():
                 self.configure_sictta()
             elif self.tta_mode == 'a3_tta':
                 self.configure_a3_tta()
+            elif self.tta_mode == 'grata':
+                self.configure_grata()
 
     def configure_alpha_norm(self, alpha):
         replaced = replace_bn_with_alpha_bn(self.netseg, alpha)
@@ -921,6 +930,38 @@ class Train_process():
         logger.info(self.saam_spmm_adapter.feature_summary())
         for name in names:
             logger.info(f"  SAAM-SPMM trainable: {name}")
+
+    def configure_source_proto_calib(self):
+        self.netseg.eval()
+        self.source_proto_calib_adapter = SourcePrototypeLogitCalibrationAdapter(
+            model=self.netseg,
+            device=next(self.netseg.parameters()).device,
+            num_classes=self.n_cls,
+            source_prototype_path=getattr(self.opt, 'source_prototype_path', None),
+            lambda_proto_calib=getattr(self.opt, 'proto_calib_lambda', 0.1),
+            min_count=getattr(self.opt, 'proto_calib_min_count', 10),
+            use_var=bool(getattr(self.opt, 'proto_calib_use_var', 1)),
+            norm=getattr(self.opt, 'proto_calib_norm', 'minmax'),
+            feature_norm=bool(getattr(self.opt, 'proto_calib_feature_norm', 0)),
+            log_interval=1,
+        )
+
+        msg = (
+            "Source-Prototype Logit Calibration enabled: frozen-model logits "
+            "post-processing only. No optimizer, backward, parameter update, "
+            "source loader, source labels, or target labels are used for calibration. "
+            f"lambda={getattr(self.opt, 'proto_calib_lambda', 0.1)}, "
+            f"min_count={getattr(self.opt, 'proto_calib_min_count', 10)}, "
+            f"use_var={getattr(self.opt, 'proto_calib_use_var', 1)}, "
+            f"norm={getattr(self.opt, 'proto_calib_norm', 'minmax')}, "
+            f"feature_norm={getattr(self.opt, 'proto_calib_feature_norm', 0)}, "
+            f"source_prototype_path={getattr(self.opt, 'source_prototype_path', None)}"
+        )
+        if not getattr(self.opt, 'quiet_console', False):
+            print(msg)
+            print(self.source_proto_calib_adapter.feature_summary())
+        logger.info(msg)
+        logger.info(self.source_proto_calib_adapter.feature_summary())
 
     def configure_gtta(self, source_loader=None):
         if source_loader is None:
@@ -1382,6 +1423,69 @@ class Train_process():
         print(msg)
         logger.info(msg)
 
+    def configure_grata(self):
+        configure_model_for_tent(self.netseg)
+        params, names = collect_bn_affine_params(self.netseg)
+        if len(params) == 0:
+            raise RuntimeError("GraTa requires BatchNorm2d affine parameters, but none were found.")
+
+        optimizer_name = getattr(self.opt, 'grata_optimizer', 'Adam')
+        if optimizer_name == 'SGD':
+            self.grata_optimizer = torch.optim.SGD(
+                params,
+                lr=getattr(self.opt, 'grata_lr', 1e-4),
+                momentum=getattr(self.opt, 'grata_momentum', 0.99),
+                nesterov=True,
+                weight_decay=0.0,
+            )
+        elif optimizer_name == 'Adam':
+            self.grata_optimizer = torch.optim.Adam(
+                params,
+                lr=getattr(self.opt, 'grata_lr', 1e-4),
+                betas=(getattr(self.opt, 'grata_beta1', 0.9), getattr(self.opt, 'grata_beta2', 0.999)),
+                weight_decay=0.0,
+            )
+        elif optimizer_name == 'AdamW':
+            self.grata_optimizer = torch.optim.AdamW(
+                params,
+                lr=getattr(self.opt, 'grata_lr', 1e-4),
+                betas=(getattr(self.opt, 'grata_beta1', 0.9), getattr(self.opt, 'grata_beta2', 0.999)),
+                weight_decay=0.0,
+            )
+        else:
+            raise ValueError(f"Unsupported grata_optimizer: {optimizer_name}")
+
+        self.grata_adapter = GraTaAdapter(
+            model=self.netseg,
+            params=params,
+            base_optimizer=self.grata_optimizer,
+            device=next(self.netseg.parameters()).device,
+            aux_loss=getattr(self.opt, 'grata_aux_loss', 'ent'),
+            pse_loss=getattr(self.opt, 'grata_pse_loss', 'consis'),
+            steps=getattr(self.opt, 'grata_steps', 1),
+            weak_views=getattr(self.opt, 'grata_weak_views', 5),
+            style_strength=getattr(self.opt, 'grata_style_strength', 1.0),
+            perturb_eps=getattr(self.opt, 'grata_perturb_eps', 1e-12),
+            episodic=getattr(self.opt, 'grata_episodic', False),
+        )
+
+        msg = (
+            "GraTa enabled: source-free gradient-alignment TTA adapted to DCON U-Net. "
+            "Target labels are used only for evaluation. "
+            f"optimizer={optimizer_name}, lr={getattr(self.opt, 'grata_lr', 1e-4)}, "
+            f"steps={getattr(self.opt, 'grata_steps', 1)}, "
+            f"aux={getattr(self.opt, 'grata_aux_loss', 'ent')}, "
+            f"pse={getattr(self.opt, 'grata_pse_loss', 'consis')}, "
+            f"weak_views={getattr(self.opt, 'grata_weak_views', 5)}, "
+            f"style_strength={getattr(self.opt, 'grata_style_strength', 1.0)}, "
+            f"episodic={getattr(self.opt, 'grata_episodic', False)}, "
+            f"trainable_bn_tensors={len(params)}, trainable_params={parameter_count(params)}"
+        )
+        print(msg)
+        logger.info(msg)
+        for name in names:
+            print(f"  - {name}")
+
     @torch.no_grad()
     def cotta_ensemble_prediction(self, images, ema_logits):
         inp_shape = images.shape[2:]
@@ -1730,6 +1834,34 @@ class Train_process():
         self.last_saam_spmm_losses = self.saam_spmm_adapter.last_losses
         return self.input_mask_te, seg
 
+    @torch.no_grad()
+    def te_func_source_proto_calib(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        # Target labels are returned for evaluation only. Source-prototype
+        # calibration uses target predictions/features and pre-exported source
+        # prototype statistics, never raw source images or any labels.
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.source_proto_calib_adapter is None:
+            raise RuntimeError(
+                "Source prototype calibration adapter is not initialized. "
+                "Call configure_source_proto_calib() first."
+            )
+
+        logits = self.source_proto_calib_adapter.forward(self.input_img_te)
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_source_proto_calib_losses = self.source_proto_calib_adapter.last_losses
+        return self.input_mask_te, seg
+
     @torch.enable_grad()
     def te_func_gtta(self, input):
         self.input_img_te = input['image'].float().cuda()
@@ -1915,6 +2047,28 @@ class Train_process():
         self.last_a3_losses = self.a3_adapter.last_losses
         return self.input_mask_te, seg
 
+    @torch.enable_grad()
+    def te_func_grata(self, input):
+        self.input_img_te = input['image'].float().cuda()
+        self.input_mask_te = input['label'].float().cuda()
+
+        if self.grata_adapter is None:
+            raise RuntimeError("GraTa adapter is not initialized. Call configure_grata() first.")
+
+        logits = self.grata_adapter.forward(self.input_img_te)
+        if logits.shape[2:] != self.input_mask_te.shape[-2:]:
+            logits = F.interpolate(
+                logits,
+                size=self.input_mask_te.shape[-2:],
+                mode='bilinear',
+                align_corners=False,
+            )
+        seg = torch.argmax(logits.detach(), 1)
+
+        self.netseg.zero_grad()
+        self.last_grata_losses = self.grata_adapter.last_losses
+        return self.input_mask_te, seg
+
     def te_func(self,input):
         tta_mode = getattr(self.opt, 'tta', 'none')
         if tta_mode == 'tent':
@@ -1935,6 +2089,8 @@ class Train_process():
             return self.te_func_smppm(input)
         if tta_mode == 'saam_spmm':
             return self.te_func_saam_spmm(input)
+        if tta_mode == 'source_proto_calib':
+            return self.te_func_source_proto_calib(input)
         if tta_mode == 'gtta':
             return self.te_func_gtta(input)
         if tta_mode == 'gold':
@@ -1951,6 +2107,8 @@ class Train_process():
             return self.te_func_sictta(input)
         if tta_mode == 'a3_tta':
             return self.te_func_a3_tta(input)
+        if tta_mode == 'grata':
+            return self.te_func_grata(input)
 
         self.input_img_te = input['image'].float().cuda()
         self.input_mask_te = input['label'].float().cuda()

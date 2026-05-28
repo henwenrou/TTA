@@ -2,9 +2,12 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OUT_DIR="outputs/reliability_tta"
 DIRECTION=""
 PYTHON_BIN="${PYTHON_BIN:-${PYTHON:-python3}}"
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 ARGS=("$@")
 idx=0
@@ -29,4 +32,4 @@ SUMMARY_ARGS=(--out_dir "${OUT_DIR}")
 if [[ -n "${DIRECTION}" ]]; then
   SUMMARY_ARGS+=(--direction "${DIRECTION}")
 fi
-"${PYTHON_BIN}" scripts/summarize_reliability_tta.py "${SUMMARY_ARGS[@]}"
+"${PYTHON_BIN}" "${REPO_ROOT}/scripts/summarize_reliability_tta.py" "${SUMMARY_ARGS[@]}"

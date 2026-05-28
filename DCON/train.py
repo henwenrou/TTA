@@ -356,8 +356,8 @@ def get_args():
     parser.add_argument('--save_prediction', type=str2bool, nargs='?', const=True, default=True, help='save_pred')
     parser.add_argument('--eval_source_domain', type=str2bool, nargs='?', const=True, default=True,
                         help='Also evaluate the source-domain trtest split after target evaluation.')
-    parser.add_argument('--tta', type=str, default='none',
-                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'sar', 'dg_tta', 'cotta', 'memo', 'asm', 'sm_ppm', 'source_ce_only', 'saam_spmm', 'gtta', 'gold', 'vptta', 'pass', 'samtta', 'spmo', 'sictta', 'a3_tta'],
+    parser.add_argument('--tta', '--tta_method', dest='tta', type=str, default='none',
+                        choices=['none', 'norm_test', 'norm_alpha', 'norm_ema', 'tent', 'sar', 'dg_tta', 'cotta', 'memo', 'asm', 'sm_ppm', 'source_ce_only', 'saam_spmm', 'source_proto_calib', 'gtta', 'gold', 'vptta', 'pass', 'samtta', 'spmo', 'sictta', 'a3_tta', 'grata'],
                         help='Test-time adaptation method.')
     parser.add_argument('--source_access', type=str2bool, nargs='?', const=True, default=False,
                         help='Add one labeled source batch to each TENT/SAR/CoTTA adaptation step.')
@@ -497,6 +497,16 @@ def get_args():
                         help='Parameters updated by SAAM-SPMM.')
     parser.add_argument('--source_prototype_path', type=str, default=None,
                         help='Path to source prototypes for SAAM-SPMM or source prototype export.')
+    parser.add_argument('--proto_calib_lambda', type=float, default=0.1,
+                        help='Source-prototype logit calibration strength.')
+    parser.add_argument('--proto_calib_min_count', type=float, default=10,
+                        help='Minimum source prototype count required for a class to calibrate logits.')
+    parser.add_argument('--proto_calib_use_var', type=int, default=1,
+                        help='Use source prototype variance for Mahalanobis-style distance/reliability, 1=on, 0=off.')
+    parser.add_argument('--proto_calib_norm', type=str, default='minmax', choices=['minmax', 'zscore', 'none'],
+                        help='Distance normalization for source-prototype logit calibration.')
+    parser.add_argument('--proto_calib_feature_norm', type=int, default=0,
+                        help='L2 normalize target features and source prototypes before distance, 1=on, 0=off.')
     parser.add_argument('--gtta_lr', type=float, default=2.5e-4,
                         help='Learning rate for GTTA supervised source and target pseudo-label updates.')
     parser.add_argument('--gtta_momentum', type=float, default=0.9,
@@ -709,6 +719,30 @@ def get_args():
                         help='Reset A3-TTA model and prototype pool before each target slice.')
     parser.add_argument('--a3_reset_on_scan_start', type=str2bool, nargs='?', const=True, default=False,
                         help='Reset A3-TTA model and prototype pool when a new target scan starts.')
+    parser.add_argument('--grata_optimizer', type=str, default='Adam', choices=['SGD', 'Adam', 'AdamW'],
+                        help='Optimizer used by GraTa for BN affine updates.')
+    parser.add_argument('--grata_lr', type=float, default=1e-4,
+                        help='Base learning rate for GraTa before gradient-alignment scaling.')
+    parser.add_argument('--grata_momentum', type=float, default=0.99,
+                        help='SGD momentum for GraTa when --grata_optimizer SGD is used.')
+    parser.add_argument('--grata_beta1', type=float, default=0.9,
+                        help='Adam/AdamW beta1 for GraTa.')
+    parser.add_argument('--grata_beta2', type=float, default=0.999,
+                        help='Adam/AdamW beta2 for GraTa.')
+    parser.add_argument('--grata_steps', type=int, default=1,
+                        help='Number of GraTa gradient-alignment updates per test batch.')
+    parser.add_argument('--grata_aux_loss', type=str, default='ent', choices=['ent', 'consis'],
+                        help='Auxiliary target loss used for the first GraTa gradient.')
+    parser.add_argument('--grata_pse_loss', type=str, default='consis', choices=['ent', 'consis'],
+                        help='Pseudo target loss used for the second GraTa gradient.')
+    parser.add_argument('--grata_weak_views', type=int, default=5,
+                        help='Number of weak rotation/flip views for GraTa consistency, in [1, 5].')
+    parser.add_argument('--grata_style_strength', type=float, default=1.0,
+                        help='Intensity augmentation strength for GraTa consistency.')
+    parser.add_argument('--grata_perturb_eps', type=float, default=1e-12,
+                        help='Numerical epsilon for GraTa gradient cosine.')
+    parser.add_argument('--grata_episodic', type=str2bool, nargs='?', const=True, default=False,
+                        help='Reset GraTa model and optimizer before each target batch.')
 
     parser.add_argument('--validation_freq', type=int, default=10, help='valfreq')
     parser.add_argument('--display_freq', type=int, default=500, help='imgfreq')
@@ -821,6 +855,9 @@ def get_args():
             args.use_saam = 1
         if 'saam_spmm' not in args.expname:
             args.expname = f"saam_spmm_{args.expname}"
+    if args.phase == 'test' and args.tta == 'source_proto_calib':
+        if 'source_proto_calib' not in args.expname:
+            args.expname = f"source_proto_calib_{args.expname}"
     if args.phase == 'test' and args.tta == 'source_ce_only':
         args.smppm_ablation_mode = 'source_ce_only'
 
@@ -1142,6 +1179,22 @@ def get_args():
         raise ValueError("a3_entropy_match_weight must be >= 0")
     if args.a3_ema_loss_weight < 0:
         raise ValueError("a3_ema_loss_weight must be >= 0")
+    if args.grata_lr <= 0:
+        raise ValueError(f"Invalid grata_lr={args.grata_lr}. Must be > 0")
+    if args.grata_momentum < 0:
+        raise ValueError(f"Invalid grata_momentum={args.grata_momentum}. Must be >= 0")
+    if not (0.0 <= args.grata_beta1 < 1.0):
+        raise ValueError(f"Invalid grata_beta1={args.grata_beta1}. Must be in [0, 1)")
+    if not (0.0 <= args.grata_beta2 < 1.0):
+        raise ValueError(f"Invalid grata_beta2={args.grata_beta2}. Must be in [0, 1)")
+    if args.grata_steps < 1:
+        raise ValueError(f"Invalid grata_steps={args.grata_steps}. Must be >= 1")
+    if not (1 <= args.grata_weak_views <= 5):
+        raise ValueError(f"Invalid grata_weak_views={args.grata_weak_views}. Must be in [1, 5]")
+    if args.grata_style_strength < 0:
+        raise ValueError("grata_style_strength must be >= 0")
+    if args.grata_perturb_eps <= 0:
+        raise ValueError(f"Invalid grata_perturb_eps={args.grata_perturb_eps}. Must be > 0")
     if args.phase not in ['train', 'test', 'export_source_prototypes']:
         raise ValueError("phase must be train, test, or export_source_prototypes")
     if args.phase != 'test' and args.tta != 'none':
@@ -1357,6 +1410,15 @@ if __name__ == '__main__':
         logging.info("proto_momentum:"+str(opt.proto_momentum))
         logging.info("proto_loss:"+str(opt.proto_loss))
         logging.info("source_prototype_path:"+str(opt.source_prototype_path))
+    elif opt.tta == 'source_proto_calib':
+        logging.info("=== Source-Prototype Logit Calibration Configuration ===")
+        logging.info("Frozen-model logit post-processing only: no optimizer, no backward, no parameter update, no source images/labels, no target labels.")
+        logging.info("source_prototype_path:"+str(opt.source_prototype_path))
+        logging.info("proto_calib_lambda:"+str(opt.proto_calib_lambda))
+        logging.info("proto_calib_min_count:"+str(opt.proto_calib_min_count))
+        logging.info("proto_calib_use_var:"+str(opt.proto_calib_use_var))
+        logging.info("proto_calib_norm:"+str(opt.proto_calib_norm))
+        logging.info("proto_calib_feature_norm:"+str(opt.proto_calib_feature_norm))
     elif opt.tta == 'gtta':
         logging.info("=== GTTA Configuration ===")
         logging.info("GTTA is source-dependent TTA: source labels supervise adaptation; target labels are evaluation-only.")
@@ -1485,6 +1547,17 @@ if __name__ == '__main__':
         logging.info("a3_ema_loss_weight:"+str(opt.a3_ema_loss_weight))
         logging.info("a3_episodic:"+str(opt.a3_episodic))
         logging.info("a3_reset_on_scan_start:"+str(opt.a3_reset_on_scan_start))
+    elif opt.tta == 'grata':
+        logging.info("=== GraTa Configuration ===")
+        logging.info("GraTa is source-free gradient-alignment TTA: target labels are evaluation-only.")
+        logging.info("grata_optimizer:"+str(opt.grata_optimizer))
+        logging.info("grata_lr:"+str(opt.grata_lr))
+        logging.info("grata_steps:"+str(opt.grata_steps))
+        logging.info("grata_aux_loss:"+str(opt.grata_aux_loss))
+        logging.info("grata_pse_loss:"+str(opt.grata_pse_loss))
+        logging.info("grata_weak_views:"+str(opt.grata_weak_views))
+        logging.info("grata_style_strength:"+str(opt.grata_style_strength))
+        logging.info("grata_episodic:"+str(opt.grata_episodic))
     
     tb_writer = SummaryWriter( tbfile_dir  )
 
@@ -1812,6 +1885,15 @@ if __name__ == '__main__':
                 f"lambda_cons={opt.lambda_cons}, proto_loss={opt.proto_loss}, "
                 f"proto_momentum={opt.proto_momentum}, source_prototype_path={opt.source_prototype_path}"
             )
+        elif opt.tta == 'source_proto_calib':
+            print(
+                "Source-Prototype Logit Calibration config: frozen-model logits post-processing only; "
+                "no optimizer/backward/parameter update/source loader/source labels/target labels. "
+                f"lambda={opt.proto_calib_lambda}, min_count={opt.proto_calib_min_count}, "
+                f"use_var={opt.proto_calib_use_var}, norm={opt.proto_calib_norm}, "
+                f"feature_norm={opt.proto_calib_feature_norm}, "
+                f"source_prototype_path={opt.source_prototype_path}"
+            )
         elif opt.tta == 'gtta':
             print(
                 "GTTA config: source-dependent supervised TTA with medical class-aware AdaIN; "
@@ -1888,6 +1970,15 @@ if __name__ == '__main__':
                 f"entropy_w={opt.a3_entropy_match_weight}, "
                 f"ema_w={opt.a3_ema_loss_weight}, "
                 f"episodic={opt.a3_episodic}, reset_on_scan_start={opt.a3_reset_on_scan_start}"
+            )
+        elif opt.tta == 'grata':
+            print(
+                "GraTa config: source-free gradient-alignment TTA; "
+                "target labels are evaluation-only. "
+                f"optimizer={opt.grata_optimizer}, lr={opt.grata_lr}, "
+                f"steps={opt.grata_steps}, aux={opt.grata_aux_loss}, pse={opt.grata_pse_loss}, "
+                f"weak_views={opt.grata_weak_views}, style_strength={opt.grata_style_strength}, "
+                f"episodic={opt.grata_episodic}"
             )
         print(f"{'='*80}\n")
 

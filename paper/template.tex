@@ -1,0 +1,194 @@
+% MDPI Diagnostics manuscript template.
+% Official MDPI LaTeX template files are kept in the Definitions/ directory.
+
+\documentclass[diagnostics,article,submit,pdftex,moreauthors]{Definitions/mdpi}
+
+%=================================================================
+% MDPI internal commands - do not modify before submission unless required by MDPI.
+\firstpage{1}
+\makeatletter
+\setcounter{page}{\@firstpage}
+\makeatother
+\pubvolume{1}
+\issuenum{1}
+\articlenumber{0}
+\pubyear{2026}
+\copyrightyear{2026}
+\datereceived{}
+\daterevised{}
+\dateaccepted{}
+\datepublished{}
+
+%=================================================================
+% Add packages and custom commands here if needed.
+
+%=================================================================
+% Full title of the paper
+\Title{A Source-Assisted Test-Time Adaptation Framework for Robust Cross-Domain Medical Image Segmentation}
+
+% Author ORCID IDs: uncomment and fill when available.
+%\newcommand{\orcidauthorA}{0000-0000-0000-0000}
+
+% Authors
+\Author{Wenrui Huang $^{1}$, Author Two $^{2}$ and Author Three $^{3,}$*}
+
+% MDPI internal command: authors for metadata in PDF
+\AuthorNames{Wenrui Huang, Author Two and Author Three}
+
+% Affiliations / addresses
+\address{%
+$^{1}$ \quad School of Artificial Intelligence, Anhui Agricultural University, Hefei, China; wenrui.huang@example.com\\
+$^{2}$ \quad Department of XXX, XXX University, City, Country; author.two@example.com\\
+$^{3}$ \quad Department of XXX, XXX Hospital, City, Country; author.three@example.com}
+
+% Corresponding author
+\corres{Correspondence: xxx@xxx.com}
+
+% Abstract
+\abstract{Cross-domain medical image segmentation remains challenging because models trained on source-domain data often degrade under shifts in scanner vendor, acquisition protocol, patient population, and annotation practice. This study presents a source-assisted test-time adaptation framework for robust medical image segmentation under target-domain distribution shift. The framework uses source-domain knowledge to regularize target-time updates while avoiding direct reliance on target labels. It is designed to preserve anatomy-aware segmentation behavior, reduce unstable adaptation, and improve deployment reliability across heterogeneous clinical imaging domains. Experiments will evaluate the method on representative cross-domain segmentation settings using standard segmentation metrics, robustness analyses, and ablation studies. The expected contribution is a practical adaptation pipeline that better aligns algorithmic performance with the deployment conditions encountered in diagnostic imaging workflows.}
+
+% Keywords
+\keyword{medical image segmentation; test-time adaptation; domain shift; cross-domain generalization; source-assisted learning; diagnostics}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{document}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Introduction}
+
+Medical image segmentation is a core component of many computer-aided diagnosis and treatment-planning pipelines. In practice, segmentation models often face substantial distribution shifts caused by differences in scanner hardware, imaging protocols, patient cohorts, reconstruction settings, and institutional annotation standards. These shifts can reduce the reliability of models that perform well on their training data but are deployed in new clinical environments.
+
+Test-time adaptation (TTA) offers a practical way to update a trained model using unlabeled target-domain data available during deployment. However, medical segmentation creates specific risks for unconstrained adaptation: target batches can be small, anatomical structures can be ambiguous, and unstable updates may degrade clinically relevant boundaries. This paper studies a source-assisted TTA framework that uses source-domain knowledge to stabilize target-time adaptation for robust cross-domain medical image segmentation.
+
+The main contributions of this manuscript are as follows:
+\begin{itemize}
+\item We formulate a source-assisted TTA framework for cross-domain medical image segmentation under unlabeled target-domain deployment.
+\item We introduce an adaptation strategy designed to preserve source-domain anatomical priors while allowing target-specific normalization and representation adjustment.
+\item We evaluate the framework across representative medical image segmentation domain shifts and provide ablation studies to analyze each component.
+\end{itemize}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Related Work}
+
+\subsection{Medical Image Segmentation}
+
+Deep convolutional and transformer-based segmentation models have achieved strong results in medical imaging, but their performance remains sensitive to dataset shift. Differences between training and deployment environments are especially important in diagnostic applications, where segmentation errors can affect downstream measurements and clinical interpretation.
+
+\subsection{Domain Generalization and Domain Adaptation}
+
+Domain generalization aims to learn models that transfer to unseen target domains without target-domain data during training. Domain adaptation uses target-domain samples to reduce the gap between source and target distributions. In medical imaging, most adaptation methods assume access to target-domain data before deployment, whereas real diagnostic workflows may require adaptation at inference time.
+
+\subsection{Test-Time Adaptation}
+
+TTA updates a model during inference using unlabeled target samples. Existing TTA methods often rely on entropy minimization, normalization-statistics adaptation, self-training, or consistency regularization. For segmentation tasks, the dense prediction setting increases both the amount of target-time signal and the risk of error accumulation. Source-assisted constraints can help keep adaptation useful while limiting drift from clinically meaningful representations learned from the source domain.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Materials and Methods}
+
+\subsection{Problem Setting}
+
+Let $\mathcal{D}_{s}=\{(x_i^s,y_i^s)\}_{i=1}^{N_s}$ denote labeled source-domain images and segmentation masks, and let $\mathcal{D}_{t}=\{x_j^t\}_{j=1}^{N_t}$ denote unlabeled target-domain images available at test time. A segmentation model $f_{\theta}$ is trained on $\mathcal{D}_{s}$ and adapted during inference on $\mathcal{D}_{t}$ without access to target labels. The objective is to improve target-domain segmentation accuracy while preserving source-trained anatomical consistency.
+
+\subsection{Framework Overview}
+
+The proposed source-assisted TTA framework contains three stages: source model preparation, target-time adaptation, and adapted inference. During source model preparation, the base segmentation model learns anatomy-aware representations from labeled source data. During target-time adaptation, selected model parameters are updated using unlabeled target images under source-assisted regularization. During adapted inference, the updated model produces segmentation masks for target-domain images.
+
+\subsection{Source-Assisted Adaptation Objective}
+
+The adaptation objective combines target-domain unsupervised losses with a source-assisted regularization term:
+\begin{linenomath}
+\begin{equation}
+\mathcal{L}_{tta} = \mathcal{L}_{target}(x^t;\theta) + \lambda \mathcal{L}_{source}(\theta,\theta_0),
+\end{equation}
+\end{linenomath}
+where $\theta_0$ denotes the source-trained parameters, $\mathcal{L}_{target}$ encourages confident and consistent target predictions, $\mathcal{L}_{source}$ constrains adaptation to remain close to source-domain knowledge, and $\lambda$ controls the regularization strength.
+
+\subsection{Implementation Details}
+
+The implementation will specify the segmentation backbone, train-time preprocessing, optimization settings, adapted parameter subset, target-time batch construction, and stopping criteria. All hyperparameters should be selected using only source-domain validation data or a protocol that does not use target labels.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Experiments and Results}
+
+\subsection{Datasets and Evaluation Protocol}
+
+Experiments should include representative cross-domain medical image segmentation benchmarks. Each experiment should define the source domain, target domain, anatomical structures, image modality, preprocessing pipeline, and train/validation/test split. Performance should be reported using standard segmentation metrics such as Dice similarity coefficient, Hausdorff distance, average surface distance, sensitivity, and specificity where appropriate.
+
+\subsection{Baselines}
+
+The proposed framework should be compared with a non-adapted source model, common TTA baselines, and relevant domain adaptation or domain generalization methods when their settings are comparable. Baselines should use the same source-trained backbone whenever possible.
+
+\subsection{Main Results}
+
+Main results will report target-domain segmentation performance across datasets and domain shifts. Tables should include mean and standard deviation across cases or repeated runs. Statistical testing should be added where clinically and experimentally appropriate.
+
+\subsection{Ablation Studies}
+
+Ablation studies should evaluate the contribution of source-assisted regularization, target-time objective terms, adapted parameter choices, target batch size, and adaptation steps. These experiments should clarify which components improve robustness and which settings may cause over-adaptation.
+
+\subsection{Robustness Analysis}
+
+Robustness analysis should examine performance under varying target-domain severity, small target batches, noisy inputs, and different acquisition settings. Failure cases should be visualized with representative segmentation overlays.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Discussion}
+
+The proposed framework is intended to improve deployment robustness for medical image segmentation models in diagnostic environments affected by domain shift. A key advantage of source-assisted TTA is that it can use target-domain information available during inference while limiting harmful drift away from source-trained anatomical representations.
+
+The discussion should interpret performance gains in relation to clinical imaging variability, deployment constraints, and segmentation failure modes. It should also identify limitations, including computational overhead during inference, sensitivity to target-time hyperparameters, and the need for careful validation before clinical use.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{Conclusions}
+
+This manuscript presents a source-assisted TTA framework for robust cross-domain medical image segmentation. By combining target-time adaptation with constraints derived from source-domain knowledge, the framework aims to improve segmentation reliability under diagnostic imaging domain shifts. Future work should extend the framework to additional modalities, prospective multi-center validation, and integration with clinically meaningful uncertainty estimation.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\vspace{6pt}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\authorcontributions{Conceptualization, W.H.; methodology, W.H.; software, W.H.; validation, W.H.; formal analysis, W.H.; investigation, W.H.; writing---original draft preparation, W.H.; writing---review and editing, W.H., A.T. and A.T.; supervision, A.T.; project administration, A.T. All authors have read and agreed to the published version of the manuscript.}
+
+\funding{This research received no external funding.}
+
+\institutionalreview{Not applicable.}
+
+\informedconsent{Not applicable.}
+
+\dataavailability{Data availability will be specified according to the datasets used in the final experimental protocol.}
+
+\acknowledgments{The authors acknowledge the support of their institutions during the preparation of this manuscript.}
+
+\conflictsofinterest{The authors declare no conflicts of interest.}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\abbreviations{Abbreviations}{
+The following abbreviations are used in this manuscript:
+\\
+
+\noindent
+\begin{tabular}{@{}ll}
+TTA & Test-time adaptation\\
+DSC & Dice similarity coefficient\\
+HD & Hausdorff distance\\
+MRI & Magnetic resonance imaging\\
+CT & Computed tomography
+\end{tabular}
+}
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\begin{adjustwidth}{-\extralength}{0cm}
+
+\reftitle{References}
+
+\begin{thebibliography}{999}
+\bibitem{tta-placeholder}
+Author, A.; Author, B. Title of a related test-time adaptation study. \emph{Journal Abbreviation} \textbf{2026}, \emph{1}, 1--10.
+
+\bibitem{segmentation-placeholder}
+Author, C.; Author, D. Title of a related medical image segmentation study. \emph{Journal Abbreviation} \textbf{2026}, \emph{1}, 11--20.
+\end{thebibliography}
+
+\PublishersNote{}
+\end{adjustwidth}
+
+\end{document}

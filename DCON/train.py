@@ -808,7 +808,16 @@ def get_args():
     parser.add_argument('--saam_topk', type=float, default=0.3,
                         help='Top-k ratio rho for stable-region selection in SAAM (default: 0.3)')
     parser.add_argument('--saam_stability_mode', type=str, default='mean',
+                        choices=['mean', 'max'],
                         help='Stability aggregation mode used by SAAM: mean or max (default: mean)')
+    parser.add_argument('--saam_weight_type', type=str, default='stability',
+                        choices=['stability', 'entropy', 'confidence', 'uniform', 'foreground_only'],
+                        help='SAAM alignment weight source. stability keeps the original feature-stability gate.')
+    parser.add_argument('--uncertainty_tau', type=float, default=0.5,
+                        help='Temperature tau for entropy-based prediction uncertainty weighting.')
+    parser.add_argument('--uncertainty_view_mode', type=str, default='anchor_only',
+                        choices=['anchor_only', 'tri_view_mean'],
+                        help='Prediction-view source for entropy/confidence SAAM weights.')
     parser.add_argument('--lambda_01', type=float, default=1.0,
                         help='Alignment weight for anchor-base pair (default: 1.0)')
     parser.add_argument('--lambda_02', type=float, default=1.0,
@@ -821,6 +830,11 @@ def get_args():
                         help='Optional seg loss weight for the anchor view (default: 0.0)')
     parser.add_argument('--strong_seg_alpha', type=float, default=1.0,
                         help='Seg loss weight for the strong view when SAAM is enabled (paper default: 1.0)')
+    parser.add_argument('--mechanism_log_interval', type=int, default=0,
+                        help='If >0, log CGSD-SAAM mechanism scalar metrics every N training iterations. '
+                             'This is analysis-only and does not affect optimization.')
+    parser.add_argument('--mechanism_morph_kernel', type=int, default=3, choices=[3, 5],
+                        help='Morphological kernel size for online core/boundary/background metrics.')
 
     # RCCS parameters
     parser.add_argument('--use_rccs', type=int, default=0,
@@ -890,6 +904,16 @@ def get_args():
     if hasattr(args, 'cgsd_layer'):
         if args.cgsd_layer not in [1, 2, 3]:
             raise ValueError(f"Invalid cgsd_layer={args.cgsd_layer}. Must be 1, 2, or 3")
+    if args.uncertainty_tau <= 0:
+        raise ValueError(f"Invalid uncertainty_tau={args.uncertainty_tau}. Must be > 0")
+    if not (0.0 < args.saam_topk <= 1.0):
+        raise ValueError(f"Invalid saam_topk={args.saam_topk}. Must be in (0, 1]")
+    if args.saam_tau <= 0:
+        raise ValueError(f"Invalid saam_tau={args.saam_tau}. Must be > 0")
+    if args.saam_warmup_epochs < 0:
+        raise ValueError("saam_warmup_epochs must be >= 0")
+    if args.saam_rampup_epochs <= 0:
+        raise ValueError("saam_rampup_epochs must be > 0")
 
     if args.tent_steps < 1:
         raise ValueError(f"Invalid tent_steps={args.tent_steps}. Must be >= 1")
@@ -1292,12 +1316,17 @@ if __name__ == '__main__':
         logging.info("saam_tau: "+str(opt.saam_tau))
         logging.info("saam_topk: "+str(opt.saam_topk))
         logging.info("saam_stability_mode: "+str(opt.saam_stability_mode))
+        logging.info("saam_weight_type: "+str(opt.saam_weight_type))
+        logging.info("uncertainty_tau: "+str(opt.uncertainty_tau))
+        logging.info("uncertainty_view_mode: "+str(opt.uncertainty_view_mode))
         logging.info("lambda_01: "+str(opt.lambda_01))
         logging.info("lambda_02: "+str(opt.lambda_02))
         logging.info("saam_warmup_epochs: "+str(opt.saam_warmup_epochs))
         logging.info("saam_rampup_epochs: "+str(opt.saam_rampup_epochs))
         logging.info("anchor_seg_alpha:"+str(opt.anchor_seg_alpha))
         logging.info("strong_seg_alpha:"+str(opt.strong_seg_alpha))
+        logging.info("mechanism_log_interval:"+str(opt.mechanism_log_interval))
+        logging.info("mechanism_morph_kernel:"+str(opt.mechanism_morph_kernel))
 
     # RCCS Configuration logging
     if hasattr(opt, 'use_rccs') and opt.use_rccs:
@@ -2071,7 +2100,7 @@ if __name__ == '__main__':
                 if train_batch["label"].shape[0] != opt.batchSize:
                     continue
 
-                tr_log=model.tr_func(train_batch,epoch)
+                tr_log=model.tr_func(train_batch, epoch, iteration=iternum)
 
                 for key, x in tr_log.items():
                     tb_writer.add_scalar(key, x,iternum)
@@ -2100,8 +2129,15 @@ if __name__ == '__main__':
                             postfix_dict['eff_pix'] = f'{model.saam_stats["effective_pixels"]:.1f}'
                         if 'topk_selected_ratio' in model.saam_stats:
                             postfix_dict['topk%'] = f'{model.saam_stats["topk_selected_ratio"]*100:.1f}'
+                        if 'alignment_weight_mean' in model.saam_stats:
+                            postfix_dict['w_mean'] = f'{model.saam_stats["alignment_weight_mean"]:.3f}'
                 if opt.use_cgsd:
                     postfix_dict['str'] = f'{model.loss_str.item():.4f}'
+                if getattr(model, 'mechanism_stats', None):
+                    if 'mechanism_mean_dstab_core' in model.mechanism_stats:
+                        postfix_dict['core_d'] = f'{model.mechanism_stats["mechanism_mean_dstab_core"]:.3f}'
+                    if 'mechanism_topk_boundary_ratio' in model.mechanism_stats:
+                        postfix_dict['bd_topk'] = f'{model.mechanism_stats["mechanism_topk_boundary_ratio"]:.3f}'
                 train_pbar.set_postfix(postfix_dict)
 
                 # Log detailed info to file only
@@ -2119,10 +2155,40 @@ if __name__ == '__main__':
                         model.loss_saam.item(), model.loss_saam_01.item(), model.loss_saam_02.item())
                     if hasattr(model, 'saam_stats') and model.saam_stats:
                         stats = model.saam_stats
-                        log_str += "topk:{:.2%} eff_pix:{:.1f} ".format(
-                            stats.get('topk_selected_ratio', 0), stats.get('effective_pixels', 0))
+                        if 'topk_selected_ratio' in stats:
+                            log_str += "topk:{:.2%} ".format(stats.get('topk_selected_ratio', 0))
+                        log_str += "eff_pix:{:.1f} ".format(stats.get('effective_pixels', 0))
+                        log_str += (
+                            "saam_weight_type:{} uncertainty_view_mode:{} "
+                            "mean_weight:{:.6f} min_weight:{:.6f} max_weight:{:.6f} "
+                            "alignment_loss:{:.6f} "
+                        ).format(
+                            stats.get('saam_weight_type', getattr(opt, 'saam_weight_type', 'stability')),
+                            stats.get('uncertainty_view_mode', getattr(opt, 'uncertainty_view_mode', 'anchor_only')),
+                            stats.get('alignment_weight_mean', 0.0),
+                            stats.get('alignment_weight_min', 0.0),
+                            stats.get('alignment_weight_max', 0.0),
+                            stats.get('alignment_loss', model.loss_saam.item()),
+                        )
                 if getattr(model, 'rccs_applied', False):
                     log_str += "rccs:1 "
+                if getattr(model, 'mechanism_stats', None):
+                    ms = model.mechanism_stats
+                    log_str += (
+                        "mech_core:{:.6f} mech_boundary:{:.6f} mech_background:{:.6f} "
+                        "mech_topk_core:{:.6f} mech_topk_boundary:{:.6f} "
+                    ).format(
+                        ms.get('mechanism_mean_dstab_core', 0.0),
+                        ms.get('mechanism_mean_dstab_boundary', 0.0),
+                        ms.get('mechanism_mean_dstab_background', 0.0),
+                        ms.get('mechanism_topk_core_ratio', 0.0),
+                        ms.get('mechanism_topk_boundary_ratio', 0.0),
+                    )
+                    if 'mechanism_d_str' in ms and 'mechanism_d_sty' in ms:
+                        log_str += "mech_d_str:{:.6f} mech_d_sty:{:.6f} ".format(
+                            ms.get('mechanism_d_str', 0.0),
+                            ms.get('mechanism_d_sty', 0.0),
+                        )
                 logger.info(log_str)
                 
     

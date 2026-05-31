@@ -14,7 +14,11 @@ from torch.autograd import Variable
 
 from .unet import *
 from .sgf import get_sgf_map
-from .saam import StabilityAwareAlignmentModule, compute_saam_loss
+from .saam import (
+    StabilityAwareAlignmentModule,
+    compute_prediction_reliability_from_views,
+    compute_saam_loss,
+)
 from .tta_asm import ASMAdapter
 from .tta_gtta import GTTAAdapter
 from .tta_smppm import SMPPMAdapter
@@ -263,7 +267,13 @@ class Train_process():
                 topk_ratio=opt.saam_topk if hasattr(opt, 'saam_topk') else 0.3,
                 stability_mode=opt.saam_stability_mode if hasattr(opt, 'saam_stability_mode') else 'mean'
             ).cuda()
-            print(f"SAAM initialized: tau={opt.saam_tau}, topk={opt.saam_topk}, mode={opt.saam_stability_mode}")
+            print(
+                f"SAAM initialized: tau={opt.saam_tau}, topk={opt.saam_topk}, "
+                f"mode={opt.saam_stability_mode}, "
+                f"weight_type={getattr(opt, 'saam_weight_type', 'stability')}, "
+                f"uncertainty_tau={getattr(opt, 'uncertainty_tau', 0.5)}, "
+                f"uncertainty_view_mode={getattr(opt, 'uncertainty_view_mode', 'anchor_only')}"
+            )
         else:
             self.saam_module = None
 
@@ -2230,6 +2240,76 @@ class Train_process():
         cos_sim = F.cosine_similarity(z1, z2, dim=1)
         return -(1 - cos_sim).mean()
 
+    def should_log_mechanism(self, iteration):
+        interval = int(getattr(self.opt, 'mechanism_log_interval', 0))
+        return interval > 0 and iteration is not None and iteration % interval == 0
+
+    def compute_cgsd_distance(self, f_a, f_b):
+        use_projector = (
+            hasattr(self, 'projector_str') and
+            self.projector_str is not None and
+            getattr(self.opt, 'use_projector', 1) == 1
+        )
+        if use_projector:
+            z_a = self.projector_str(f_a)
+            z_b = self.projector_str(f_b)
+        else:
+            z_a = F.adaptive_avg_pool2d(f_a, 1).view(f_a.size(0), -1)
+            z_b = F.adaptive_avg_pool2d(f_b, 1).view(f_b.size(0), -1)
+        return (1.0 - F.cosine_similarity(z_a, z_b, dim=1)).mean()
+
+    def compute_online_mechanism_stats(self, encf_0, encf_1, encf_2,
+                                       f_str_1=None, f_str_2=None,
+                                       f_sty_1=None, f_sty_2=None):
+        if self.saam_module is None:
+            return {}
+        with torch.no_grad():
+            d_stab, _, _, _ = self.saam_module.compute_stability(encf_0, encf_1, encf_2)
+            topk_mask = self.saam_module.compute_topk_mask(
+                d_stab, getattr(self.saam_module, 'topk_ratio', getattr(self.opt, 'saam_topk', 0.3))
+            )
+
+            gt = self.input_mask
+            gt_2d = gt.squeeze(1) if gt.dim() == 4 else gt
+            fg_high = (gt_2d != 0).float().unsqueeze(1)
+            k = int(getattr(self.opt, 'mechanism_morph_kernel', 3))
+            pad = k // 2
+            dilated = F.max_pool2d(fg_high, kernel_size=k, stride=1, padding=pad)
+            eroded = 1.0 - F.max_pool2d(1.0 - fg_high, kernel_size=k, stride=1, padding=pad)
+            boundary_high = (dilated - eroded).clamp_min(0.0)
+
+            size = d_stab.shape[-2:]
+            core = F.interpolate(eroded, size=size, mode='nearest').squeeze(1) > 0.5
+            boundary = F.interpolate(boundary_high, size=size, mode='nearest').squeeze(1) > 0.5
+            background = F.interpolate(1.0 - fg_high, size=size, mode='nearest').squeeze(1) > 0.5
+            topk_bool = topk_mask > 0.5
+
+            def region_mean(region_mask):
+                if not torch.any(region_mask):
+                    return 0.0
+                return d_stab[region_mask].mean().item()
+
+            def topk_ratio(region_mask):
+                denom = topk_bool.float().sum().clamp_min(1.0)
+                return (topk_bool & region_mask).float().sum().div(denom).item()
+
+            stats = {
+                'mechanism_mean_dstab_core': region_mean(core),
+                'mechanism_mean_dstab_boundary': region_mean(boundary),
+                'mechanism_mean_dstab_background': region_mean(background),
+                'mechanism_topk_core_ratio': topk_ratio(core),
+                'mechanism_topk_boundary_ratio': topk_ratio(boundary),
+                'mechanism_topk_background_ratio': topk_ratio(background),
+            }
+
+        if f_str_1 is not None and f_str_2 is not None:
+            with torch.no_grad():
+                stats['mechanism_d_str'] = self.compute_cgsd_distance(f_str_1, f_str_2).item()
+        if f_sty_1 is not None and f_sty_2 is not None:
+            with torch.no_grad():
+                stats['mechanism_d_sty'] = self.compute_cgsd_distance(f_sty_1, f_sty_2).item()
+        return stats
+
     def get_lambda_str_with_warmup(self, epoch):
         """
         Strict paper setting: CGSD uses a fixed weight from epoch 1.
@@ -2271,7 +2351,13 @@ class Train_process():
             self.saam_stats = {
                 'lambda_01': 0.0,
                 'lambda_02': 0.0,
-                'status': 'warmup'
+                'status': 'warmup',
+                'saam_weight_type': str(getattr(self.opt, 'saam_weight_type', 'stability')).lower(),
+                'uncertainty_view_mode': str(getattr(self.opt, 'uncertainty_view_mode', 'anchor_only')).lower(),
+                'alignment_weight_mean': 0.0,
+                'alignment_weight_min': 0.0,
+                'alignment_weight_max': 0.0,
+                'alignment_loss': 0.0,
             }
             return
 
@@ -2290,14 +2376,6 @@ class Train_process():
         q_1 = projf_all[B:2*B]   # [B, C', h, w]
         q_2 = projf_all[2*B:]    # [B, C', h, w]
 
-        # Upsample q features to mask resolution
-        q_0_up = F.interpolate(q_0, size=[H, W], mode="bilinear", align_corners=False)
-        q_1_up = F.interpolate(q_1, size=[H, W], mode="bilinear", align_corners=False)
-        q_2_up = F.interpolate(q_2, size=[H, W], mode="bilinear", align_corners=False)
-
-        # Compute stability gate weights
-        W_up, stats = self.saam_module(encf_0, encf_1, encf_2, mask_size=(H, W))
-
         # Create binary object mask: (GT foreground) OR (Pred foreground)
         # This matches the original pairwise alignment masking logic.
         gt_2d = gt.squeeze(1) if gt.dim() == 4 else gt  # [B, H, W]
@@ -2314,8 +2392,59 @@ class Train_process():
         # Coverage ratio of foreground pixels (for logging/debug)
         mask_coverage = (mask.sum() / mask.numel()).item()
 
+        saam_weight_type = str(getattr(self.opt, 'saam_weight_type', 'stability')).lower()
+        uncertainty_view_mode = str(getattr(self.opt, 'uncertainty_view_mode', 'anchor_only')).lower()
+        allowed_weight_types = ['stability', 'entropy', 'confidence', 'uniform', 'foreground_only']
+        if saam_weight_type not in allowed_weight_types:
+            raise ValueError(f"saam_weight_type must be one of {allowed_weight_types}, got {saam_weight_type}")
+        if uncertainty_view_mode not in ['anchor_only', 'tri_view_mean']:
+            raise ValueError(
+                f"uncertainty_view_mode must be anchor_only or tri_view_mean, got {uncertainty_view_mode}"
+            )
+
+        if saam_weight_type == 'stability':
+            # Keep the original SAAM path byte-for-byte in behavior: stability is
+            # computed from deep features, then upsampled to the mask/q resolution.
+            q_0_loss = F.interpolate(q_0, size=[H, W], mode="bilinear", align_corners=False)
+            q_1_loss = F.interpolate(q_1, size=[H, W], mode="bilinear", align_corners=False)
+            q_2_loss = F.interpolate(q_2, size=[H, W], mode="bilinear", align_corners=False)
+            W_loss, stats = self.saam_module(encf_0, encf_1, encf_2, mask_size=(H, W))
+            mask_loss = mask
+        else:
+            # Prediction-level variants are evaluated on the deep alignment grid.
+            feature_size = q_0.shape[2:]
+            q_0_loss, q_1_loss, q_2_loss = q_0, q_1, q_2
+            mask_low = F.interpolate(mask.unsqueeze(1), size=feature_size, mode="nearest").squeeze(1)
+
+            if saam_weight_type == 'uniform':
+                # Uniform ablation removes both reliability and foreground gates.
+                mask_loss = torch.ones_like(mask_low)
+                W_loss = torch.ones_like(mask_low)
+            elif saam_weight_type == 'foreground_only':
+                mask_loss = mask_low
+                W_loss = torch.ones_like(mask_low)
+            else:
+                with torch.no_grad():
+                    W_high = compute_prediction_reliability_from_views(
+                        pred_0.detach(),
+                        base_logits=pred_1.detach(),
+                        strong_logits=pred_2.detach(),
+                        weight_type=saam_weight_type,
+                        view_mode=uncertainty_view_mode,
+                        tau=getattr(self.opt, 'uncertainty_tau', 0.5),
+                    )
+                    W_loss = F.interpolate(
+                        W_high,
+                        size=feature_size,
+                        mode="bilinear",
+                        align_corners=False,
+                    ).squeeze(1).to(dtype=q_0.dtype)
+                mask_loss = mask_low.to(dtype=q_0.dtype)
+
+            stats = {}
+
         L_align, L_01, L_02, effective_pixels = compute_saam_loss(
-            q_0_up, q_1_up, q_2_up, mask, W_up,
+            q_0_loss, q_1_loss, q_2_loss, mask_loss, W_loss,
             lambda_01=lambda_01_cur, lambda_02=lambda_02_cur
         )
 
@@ -2326,17 +2455,25 @@ class Train_process():
 
         # Store statistics for logging
         self.saam_stats = stats
+        with torch.no_grad():
+            final_weight = (mask_loss * W_loss).detach()
+            self.saam_stats['saam_weight_type'] = saam_weight_type
+            self.saam_stats['uncertainty_view_mode'] = uncertainty_view_mode
+            self.saam_stats['alignment_weight_mean'] = final_weight.mean().item()
+            self.saam_stats['alignment_weight_min'] = final_weight.min().item()
+            self.saam_stats['alignment_weight_max'] = final_weight.max().item()
         self.saam_stats['lambda_01'] = lambda_01_cur
         self.saam_stats['lambda_02'] = lambda_02_cur
         self.saam_stats['L_01'] = L_01.item()
         self.saam_stats['L_02'] = L_02.item()
         self.saam_stats['L_saam'] = L_align.item()
+        self.saam_stats['alignment_loss'] = L_align.item()
         self.saam_stats['mask_coverage'] = mask_coverage  # Track mask coverage
         self.saam_stats['effective_pixels'] = effective_pixels  # Sum of M*W (useful to debug gate too strict)
 
 
     # Read anchor/base/strong views from the batch and run one mainline training step.
-    def tr_func(self, train_batch, epoch):
+    def tr_func(self, train_batch, epoch, iteration=None):
         self.epoch = epoch
 
         for param in self.netseg.parameters():
@@ -2361,6 +2498,7 @@ class Train_process():
         self.loss_saam_01 = zero.clone()
         self.loss_saam_02 = zero.clone()
         self.saam_stats = {}
+        self.mechanism_stats = {}
         self.rccs_applied = False
         self.rccs_stats = {}
         self.rccs_applied_base = False
@@ -2498,6 +2636,16 @@ class Train_process():
                 loss0 = loss_dice0 * w_dice + loss_ce0 * w_ce
                 self.forward_saam(encf0, encf1, encf2, pred_all0, pred_all1, pred_all2, epoch)
 
+        if use_saam and encf0 is not None and encf1 is not None and encf2 is not None:
+            if self.should_log_mechanism(iteration):
+                self.mechanism_stats = self.compute_online_mechanism_stats(
+                    encf0, encf1, encf2,
+                    f_str_1=f1_str_v1,
+                    f_str_2=f1_str_v2,
+                    f_sty_1=f1_sty_v1,
+                    f_sty_2=f1_sty_v2,
+                )
+
         if gate_on and f1_str_v1 is not None and f1_str_v2 is not None and self.opt.lambda_str > 0:
             lambda_str_cur = self.get_lambda_str_with_warmup(epoch)
             if lambda_str_cur > 0:
@@ -2580,6 +2728,11 @@ class Train_process():
                 for key, val in self.saam_stats.items():
                     if isinstance(val, (int, float)):
                         tr_log.append((f'saam_{key}', torch.tensor(val, device=self.input_mask.device)))
+
+        if self.mechanism_stats:
+            for key, val in self.mechanism_stats.items():
+                if isinstance(val, (int, float)):
+                    tr_log.append((key, torch.tensor(val, device=self.input_mask.device)))
 
         if self.rccs_aug is not None:
             tr_log.append(('rccs_applied', torch.tensor(1.0 if self.rccs_applied else 0.0, device=self.input_mask.device)))

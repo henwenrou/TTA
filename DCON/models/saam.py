@@ -7,6 +7,8 @@ This module:
 - applies selective alignment only on stable anchor-base and anchor-strong regions
 """
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -133,7 +135,7 @@ class StabilityAwareAlignmentModule(nn.Module):
 
         return W, R
 
-    def forward(self, f_0, f_1, f_2, mask_size):
+    def forward(self, f_0, f_1, f_2, mask_size, return_debug=False):
         """
         Compute stability and return the upsampled SAAM weights.
 
@@ -144,6 +146,7 @@ class StabilityAwareAlignmentModule(nn.Module):
         Returns:
             W_up: upsampled SAAM weights [B, H, W]
             stats: statistics dictionary for logging
+            debug: optional tensor dictionary when return_debug=True
         """
         # 1. Compute stability
         d_stab, d_01, d_02, d_12 = self.compute_stability(f_0, f_1, f_2)
@@ -193,7 +196,92 @@ class StabilityAwareAlignmentModule(nn.Module):
                 'topk_selected_ratio': topk_mask.mean().item(),  # Should be close to topk_ratio.
             }
 
+        if return_debug:
+            debug = {
+                'd_stab': d_stab,
+                'd_01': d_01,
+                'd_02': d_02,
+                'd_12': d_12,
+                'topk_mask': topk_mask,
+                'W': W,
+                'W_up': W_up,
+                'R': R,
+                'R_up': R_up,
+            }
+            return W_up, stats, debug
+
         return W_up, stats
+
+
+def compute_prediction_reliability_weight(logits, weight_type, tau=0.5, eps=1e-8):
+    """
+    Build a class-agnostic prediction-level reliability map.
+
+    Args:
+        logits: segmentation logits [B, C, H, W]
+        weight_type: 'entropy', 'confidence', or 'uniform'
+        tau: uncertainty temperature used by entropy weighting
+        eps: numerical stability constant
+
+    Returns:
+        weight: reliability map [B, 1, H, W]
+    """
+    weight_type = str(weight_type).lower()
+    if logits.dim() != 4:
+        raise ValueError(f"Expected logits [B,C,H,W], got {tuple(logits.shape)}")
+
+    if weight_type == 'uniform':
+        return torch.ones(
+            logits.size(0), 1, logits.size(2), logits.size(3),
+            device=logits.device,
+            dtype=logits.dtype,
+        )
+
+    if weight_type not in ['entropy', 'confidence']:
+        raise ValueError(f"Prediction reliability supports entropy/confidence/uniform, got {weight_type}")
+
+    probs = F.softmax(logits, dim=1)
+    if weight_type == 'entropy':
+        class_count = max(int(logits.size(1)), 2)
+        entropy = -(probs * torch.log(probs + eps)).sum(dim=1, keepdim=True)
+        entropy = entropy / math.log(class_count)
+        return torch.exp(-entropy / max(float(tau), eps))
+
+    confidence = probs.max(dim=1, keepdim=True)[0]
+    return confidence
+
+
+def compute_prediction_reliability_from_views(
+    anchor_logits,
+    base_logits=None,
+    strong_logits=None,
+    weight_type='entropy',
+    view_mode='anchor_only',
+    tau=0.5,
+    eps=1e-8,
+):
+    """
+    Compute prediction-level reliability from one or three prediction views.
+
+    Args:
+        anchor_logits, base_logits, strong_logits: logits [B, C, H, W]
+        weight_type: 'entropy', 'confidence', or 'uniform'
+        view_mode: 'anchor_only' or 'tri_view_mean'
+    """
+    view_mode = str(view_mode).lower()
+    if view_mode == 'anchor_only':
+        return compute_prediction_reliability_weight(anchor_logits, weight_type, tau=tau, eps=eps)
+    if view_mode != 'tri_view_mean':
+        raise ValueError(f"uncertainty_view_mode must be anchor_only or tri_view_mean, got {view_mode}")
+    if base_logits is None or strong_logits is None:
+        raise ValueError("tri_view_mean requires anchor/base/strong logits")
+
+    weights = [
+        compute_prediction_reliability_weight(anchor_logits, weight_type, tau=tau, eps=eps),
+        compute_prediction_reliability_weight(base_logits, weight_type, tau=tau, eps=eps),
+        compute_prediction_reliability_weight(strong_logits, weight_type, tau=tau, eps=eps),
+    ]
+    return torch.stack(weights, dim=0).mean(dim=0)
 
 
 def compute_saam_loss(q_0, q_1, q_2, mask, W, lambda_01=1.0, lambda_02=1.0):

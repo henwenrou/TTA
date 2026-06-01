@@ -329,6 +329,15 @@ def setup_default_logging(name, save_path, level=logging.INFO,
     return logger
 
 
+def write_cost_profile_row(logdir, method, epoch, train_time_sec, peak_mem_gb):
+    profile_path = osp.join(logdir, 'cost_profile.csv')
+    write_header = not osp.exists(profile_path)
+    with open(profile_path, 'a') as f:
+        if write_header:
+            f.write('method,epoch,train_time_sec,peak_mem_gb\n')
+        f.write(f'{method},{epoch},{train_time_sec:.6f},{peak_mem_gb:.6f}\n')
+
+
 def get_args():
     parser = argparse.ArgumentParser()
 
@@ -345,6 +354,12 @@ def get_args():
     parser.add_argument('--model', type=str, default='unet', help='model')
     parser.add_argument('--batchSize', type=int, default=32, help='bs')
     parser.add_argument('--all_epoch', type=int, default=50, help='epochs')
+    parser.add_argument('--profile_cost', type=int, default=0,
+                        help='Profile training time and peak GPU memory only; skip validation, saving, and final testing.')
+    parser.add_argument('--profile_method', type=str, default=None,
+                        help='Method label written to cost_profile.csv.')
+    parser.add_argument('--erm_only', type=int, default=0,
+                        help='Run strict ERM profiling: one supervised single-view U-Net update per batch.')
 
     parser.add_argument('--data_name', '--dataset', dest='data_name',
                         type=str, default='CARDIAC', help='dataset')
@@ -2097,7 +2112,11 @@ if __name__ == '__main__':
     best_epoch = -1
 
     for epoch in range(1, opt.all_epoch + 1):
+        if opt.profile_cost and torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.synchronize()
         epoch_start_time = time.time()
+        epoch_profile_start = time.perf_counter()
         epoch_mechanism_records = []
 
         # Training progress bar for each epoch
@@ -2213,6 +2232,20 @@ if __name__ == '__main__':
                    
      
  
+        if opt.profile_cost:
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()
+                peak_mem_gb = torch.cuda.max_memory_allocated() / (1024 ** 3)
+            else:
+                peak_mem_gb = 0.0
+            epoch_train_time = time.perf_counter() - epoch_profile_start
+            method_label = opt.profile_method or ('ERM' if opt.erm_only else ('SAA' if opt.use_saam else 'DCON'))
+            write_cost_profile_row(logdir, method_label, epoch, epoch_train_time, peak_mem_gb)
+            print(
+                f"[CostProfile] method={method_label} epoch={epoch} "
+                f"train_time={epoch_train_time:.3f}s peak_mem={peak_mem_gb:.3f}GB"
+            )
+
         if epoch_mechanism_records:
             numeric_keys = sorted({
                 key
@@ -2261,7 +2294,7 @@ if __name__ == '__main__':
             )
 
         #val for tr_val
-        if epoch % opt.validation_freq == 0:
+        if (not opt.profile_cost) and epoch % opt.validation_freq == 0:
             with torch.no_grad():
                 type1='val'
                 tmp= prediction_wrapper(tb_writer,type1,logdir,model, trval_loader,  epoch, label_name, save_prediction =False)
@@ -2282,7 +2315,7 @@ if __name__ == '__main__':
 
 
         # Save model periodically and at the end
-        if epoch % opt.save_freq == 0 or epoch == opt.all_epoch:
+        if (not opt.profile_cost) and (epoch % opt.save_freq == 0 or epoch == opt.all_epoch):
             print('Saving model at epoch %d, iters %d' %(epoch, iternum))
             model.save(snap_dir,epoch)
 
@@ -2341,6 +2374,10 @@ if __name__ == '__main__':
                     print(f"  ✓ Gate distribution healthy")
 
         print(f'\nEpoch {epoch}/{opt.all_epoch} completed in {int(time.time() - epoch_start_time)}s')
+
+    if opt.profile_cost:
+        print(f'\nCost profiling completed. Results saved to {osp.join(logdir, "cost_profile.csv")}')
+        sys.exit(0)
 
     # Save the latest model after training completes
     print(f'\nTraining completed. Saving final model...')

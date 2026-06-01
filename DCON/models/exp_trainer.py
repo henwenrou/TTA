@@ -2543,7 +2543,9 @@ class Train_process():
         sgf_view2_only = bool(getattr(self.opt, 'sgf_view2_only', 0)) and bool(getattr(self.opt, 'use_sgf', 0))
 
         self.input_mask = train_batch['label'].float().cuda()
-        self.input_anchor = train_batch['anchor_view'].float().cuda()
+        self.input_anchor = None
+        if not bool(getattr(self.opt, 'erm_only', 0)):
+            self.input_anchor = train_batch['anchor_view'].float().cuda()
         zero = torch.zeros(1, device=self.input_mask.device)
 
         self.loss_str = zero.clone()
@@ -2579,6 +2581,36 @@ class Train_process():
         f1_sty_v2 = None
 
         self.input_base = train_batch['base_view'].float().cuda()
+        if bool(getattr(self.opt, 'erm_only', 0)):
+            pred_all1, encf1, loss_dice1, loss_ce1 = self.forward_seg_train(
+                self.input_base, return_feat=False)
+            loss1 = loss_dice1 * w_dice + loss_ce1 * w_ce
+
+            self.loss_seg = loss1 * w_seg
+            self.loss_dice = loss_dice1 * w_dice
+            self.loss_ce = loss_ce1 * w_ce
+            self.loss_seg1 = loss1
+            self.loss_seg2 = zero.clone()
+            self.loss_dice1 = loss_dice1
+            self.loss_dice2 = zero.clone()
+            self.loss_ce1 = loss_ce1
+            self.loss_ce2 = zero.clone()
+            self.loss_all = self.loss_seg
+
+            self.optimizer_seg.zero_grad()
+            self.loss_all.backward()
+            self.optimizer_seg.step()
+
+            for param in self.netseg.parameters():
+                param.requires_grad = False
+
+            return OrderedDict([
+                ('dice', self.loss_dice),
+                ('ce', self.loss_ce),
+                ('seg', self.loss_seg),
+                ('lr', self.get_lr()),
+                ('loss', self.loss_all),
+            ])
 
         if hasattr(self.opt, 'use_sgf') and self.opt.use_sgf:
             self.input_strong_seed = train_batch['strong_view'].float().cuda()

@@ -13,7 +13,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 export SAA_DATA_ROOT="${SAA_DATA_ROOT:-/Users/RexRyder/PycharmProjects/Dataset}"
-export PYTHON_BIN="${PYTHON_BIN:-/opt/miniconda3/bin/python}"
+PYTHON_BIN=${PYTHON_BIN:-$(which python 2>/dev/null || true)}
+if [[ -z "${PYTHON_BIN}" || ! -x "${PYTHON_BIN}" ]]; then
+  PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
+fi
+export PYTHON_BIN
 export GPU_IDS="${GPU_IDS:-0}"
 export RUN_PREFIX="${RUN_PREFIX:-saam_m_isolation}"
 
@@ -24,8 +28,11 @@ export ONLY_VARIANTS="${ONLY_VARIANTS:-uniform_align m_only w_only w_times_m}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "PYTHON_BIN is not executable: ${PYTHON_BIN}" >&2
+  echo "Set it explicitly, for example: PYTHON_BIN=/path/to/env/bin/python bash scripts/start_saam_m_ablation.sh" >&2
   exit 2
 fi
+
+echo "Using PYTHON_BIN: ${PYTHON_BIN}"
 
 if [[ ! -d "${SAA_DATA_ROOT}" ]]; then
   echo "SAA_DATA_ROOT does not exist: ${SAA_DATA_ROOT}" >&2

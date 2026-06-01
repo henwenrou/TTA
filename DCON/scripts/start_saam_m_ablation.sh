@@ -12,7 +12,11 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-export SAA_DATA_ROOT="${SAA_DATA_ROOT:-/Users/RexRyder/PycharmProjects/Dataset}"
+SAA_DATA_ROOT="${SAA_DATA_ROOT:-${PROJECT_DIR}/data}"
+if [[ "${SAA_DATA_ROOT}" != /* ]]; then
+  SAA_DATA_ROOT="${PROJECT_DIR}/${SAA_DATA_ROOT}"
+fi
+export SAA_DATA_ROOT
 PYTHON_BIN=${PYTHON_BIN:-$(which python 2>/dev/null || true)}
 if [[ -z "${PYTHON_BIN}" || ! -x "${PYTHON_BIN}" ]]; then
   PYTHON_BIN="$(command -v python3 2>/dev/null || true)"

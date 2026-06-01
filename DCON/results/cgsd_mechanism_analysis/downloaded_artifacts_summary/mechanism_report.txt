@@ -1,0 +1,23 @@
+CGSD-SAAM mechanism summary
+
+Checkpoint metrics by epoch:
+epoch | method | core | boundary | topk_core | topk_boundary | d_str | d_sty | d_sty-d_str
+50 | full_saa | 0.104039 | 0.120118 | 0.105783 | 0.013789 | 0.308208 | 0.267636 | -0.040572
+50 | wo_cgsd | 0.113349 | 0.139625 | 0.111751 | 0.010908 | nan | nan | nan
+100 | full_saa | 0.039647 | 0.032093 | 0.014818 | 0.007203 | 0.281499 | 0.202021 | -0.079478
+100 | wo_cgsd | 0.017652 | 0.022173 | 0.094052 | 0.014818 | nan | nan | nan
+150 | full_saa | 0.035966 | 0.028860 | 0.003499 | 0.001646 | 0.254106 | 0.133858 | -0.120248
+150 | wo_cgsd | 0.022959 | 0.026267 | 0.103519 | 0.019963 | nan | nan | nan
+200 | full_saa | 0.036260 | 0.029521 | 0.002470 | 0.001029 | 0.246315 | 0.111970 | -0.134345
+200 | wo_cgsd | 0.008907 | 0.011790 | 0.069767 | 0.016464 | nan | nan | nan
+250 | full_saa | 0.034701 | 0.028475 | 0.002881 | 0.001029 | 0.258559 | 0.131807 | -0.126752
+250 | wo_cgsd | 0.007702 | 0.012192 | 0.075324 | 0.016670 | nan | nan | nan
+300 | full_saa | 0.032579 | 0.025961 | 0.001646 | 0.001235 | 0.261483 | 0.135485 | -0.125998
+300 | wo_cgsd | 0.005859 | 0.009242 | 0.080058 | 0.018111 | nan | nan | nan
+
+Checkpoint d_sty>d_str count: 0/6
+
+Full training log mechanism samples: 0
+w/o CGSD training log mechanism samples: 28
+w/o CGSD log has no d_str/d_sty by design, because the style branch is disabled.
+No full SAA training log was provided, so training-time style-branch collapse cannot be verified from log.txt.

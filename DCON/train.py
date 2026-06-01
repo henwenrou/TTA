@@ -2098,6 +2098,7 @@ if __name__ == '__main__':
 
     for epoch in range(1, opt.all_epoch + 1):
         epoch_start_time = time.time()
+        epoch_mechanism_records = []
 
         # Training progress bar for each epoch
         train_pbar = tqdm(enumerate(train_loader), total = train_loader.dataset.size // opt.batchSize - 1,
@@ -2148,6 +2149,7 @@ if __name__ == '__main__':
                         postfix_dict['core_d'] = f'{model.mechanism_stats["mechanism_mean_dstab_core"]:.3f}'
                     if 'mechanism_topk_boundary_ratio' in model.mechanism_stats:
                         postfix_dict['bd_topk'] = f'{model.mechanism_stats["mechanism_topk_boundary_ratio"]:.3f}'
+                    epoch_mechanism_records.append(dict(model.mechanism_stats))
                 train_pbar.set_postfix(postfix_dict)
 
                 # Log detailed info to file only
@@ -2211,6 +2213,53 @@ if __name__ == '__main__':
                    
      
  
+        if epoch_mechanism_records:
+            numeric_keys = sorted({
+                key
+                for record in epoch_mechanism_records
+                for key, value in record.items()
+                if isinstance(value, (int, float))
+            })
+            epoch_summary = {}
+            for key in numeric_keys:
+                vals = [record[key] for record in epoch_mechanism_records if key in record]
+                if vals:
+                    epoch_summary[key] = float(np.mean(vals))
+
+            d_str_epoch = epoch_summary.get('mechanism_d_str', np.nan)
+            d_sty_epoch = epoch_summary.get('mechanism_d_sty', np.nan)
+            d_gap_epoch = d_sty_epoch - d_str_epoch if not np.isnan(d_str_epoch) and not np.isnan(d_sty_epoch) else np.nan
+
+            summary_path = osp.join(logdir, 'train', 'mechanism_epoch_summary.csv')
+            write_header = not osp.exists(summary_path)
+            with open(summary_path, 'a') as f:
+                if write_header:
+                    f.write('epoch,num_samples,d_str,d_sty,d_sty_minus_d_str,'
+                            'mean_dstab_core,mean_dstab_boundary,mean_dstab_background,'
+                            'topk_core_ratio,topk_boundary_ratio,topk_background_ratio\n')
+                f.write(
+                    f"{epoch},{len(epoch_mechanism_records)},"
+                    f"{d_str_epoch},{d_sty_epoch},{d_gap_epoch},"
+                    f"{epoch_summary.get('mechanism_mean_dstab_core', np.nan)},"
+                    f"{epoch_summary.get('mechanism_mean_dstab_boundary', np.nan)},"
+                    f"{epoch_summary.get('mechanism_mean_dstab_background', np.nan)},"
+                    f"{epoch_summary.get('mechanism_topk_core_ratio', np.nan)},"
+                    f"{epoch_summary.get('mechanism_topk_boundary_ratio', np.nan)},"
+                    f"{epoch_summary.get('mechanism_topk_background_ratio', np.nan)}\n"
+                )
+
+            if not np.isnan(d_str_epoch):
+                tb_writer.add_scalar('mechanism_epoch/d_str', d_str_epoch, epoch)
+            if not np.isnan(d_sty_epoch):
+                tb_writer.add_scalar('mechanism_epoch/d_sty', d_sty_epoch, epoch)
+            if not np.isnan(d_gap_epoch):
+                tb_writer.add_scalar('mechanism_epoch/d_sty_minus_d_str', d_gap_epoch, epoch)
+            logger.info(
+                "Mechanism epoch summary - Epoch {}: samples={} d_str={} d_sty={} d_sty_minus_d_str={}".format(
+                    epoch, len(epoch_mechanism_records), d_str_epoch, d_sty_epoch, d_gap_epoch
+                )
+            )
+
         #val for tr_val
         if epoch % opt.validation_freq == 0:
             with torch.no_grad():

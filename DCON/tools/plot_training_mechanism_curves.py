@@ -24,6 +24,8 @@ def parse_args():
                         help="Moving-average window over logged sample points.")
     parser.add_argument("--collapse_threshold", type=float, default=0.02,
                         help="Style branch is flagged as collapsed if late d_sty is below this.")
+    parser.add_argument("--epoch_points", type=str, default="0,50,100,final",
+                        help="Epoch rows for the diagnostic table, e.g. 0,50,100,final.")
     return parser.parse_args()
 
 
@@ -57,6 +59,56 @@ def read_metric_csv(path):
             continue
 
     return np.asarray(steps, dtype=np.float64), np.asarray(values, dtype=np.float64)
+
+
+def read_epoch_summary(path):
+    if not path.exists():
+        return []
+    rows = []
+    with path.open(newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            parsed = {}
+            for key, value in row.items():
+                try:
+                    parsed[key] = float(value)
+                except (TypeError, ValueError):
+                    parsed[key] = value
+            if "epoch" in parsed:
+                parsed["epoch"] = int(parsed["epoch"])
+            rows.append(parsed)
+    return rows
+
+
+def select_epoch_rows(rows, spec):
+    if not rows:
+        return []
+    by_epoch = {int(row["epoch"]): row for row in rows if "epoch" in row}
+    max_epoch = max(by_epoch)
+    selected = []
+    seen = set()
+    for token in str(spec).split(","):
+        token = token.strip().lower()
+        if not token:
+            continue
+        if token == "final":
+            epoch = max_epoch
+            label = "final"
+        else:
+            epoch = int(token)
+            label = str(epoch)
+        if epoch in seen:
+            continue
+        seen.add(epoch)
+        row = dict(by_epoch.get(epoch, {
+            "epoch": epoch,
+            "d_str": np.nan,
+            "d_sty": np.nan,
+            "d_sty_minus_d_str": np.nan,
+        }))
+        row["label"] = label
+        selected.append(row)
+    return selected
 
 
 def smooth_values(values, window):
@@ -109,6 +161,38 @@ def plot_region_curves(metric_dir, out_dir, smooth):
     plt.close(fig)
 
 
+def plot_epoch_diagnostic(rows, out_dir):
+    if not rows:
+        return
+    labels = [str(row.get("label", row["epoch"])) for row in rows]
+    x = np.arange(len(rows))
+    d_str = np.asarray([row.get("d_str", np.nan) for row in rows], dtype=np.float64)
+    d_sty = np.asarray([row.get("d_sty", np.nan) for row in rows], dtype=np.float64)
+    d_gap = np.asarray([row.get("d_sty_minus_d_str", np.nan) for row in rows], dtype=np.float64)
+
+    fig, ax = plt.subplots(figsize=(7.5, 4.0), constrained_layout=True)
+    ax.plot(x, d_str, marker="o", label="d_str", linewidth=1.8)
+    ax.plot(x, d_sty, marker="o", label="d_sty", linewidth=1.8)
+    ax.plot(x, d_gap, marker="o", label="d_sty - d_str", linewidth=1.8)
+    ax.axhline(0.0, color="black", linewidth=0.8, alpha=0.35)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_xlabel("Epoch")
+    ax.set_ylabel("Cosine distance")
+    ax.set_title("CGSD Structure/Style Distance Diagnostic")
+    ax.grid(alpha=0.25)
+    ax.legend()
+    fig.savefig(out_dir / "training_diagnostic_epoch_plot.png", dpi=180)
+    plt.close(fig)
+
+    with (out_dir / "training_diagnostic_epoch_table.csv").open("w", newline="") as f:
+        fieldnames = ["epoch", "label", "d_str", "d_sty", "d_sty_minus_d_str"]
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({key: row.get(key, "") for key in fieldnames})
+
+
 def summarize(d_str, d_sty, collapse_threshold):
     tail = max(1, int(math.ceil(0.2 * max(d_sty.size, 1))))
     late_d_str = float(np.nanmean(d_str[-tail:])) if d_str.size else math.nan
@@ -149,6 +233,10 @@ def main():
         smooth=args.smooth,
     )
     plot_region_curves(metric_dir, args.out_dir, args.smooth)
+
+    epoch_rows = read_epoch_summary(metric_dir / "mechanism_epoch_summary.csv")
+    diagnostic_rows = select_epoch_rows(epoch_rows, args.epoch_points)
+    plot_epoch_diagnostic(diagnostic_rows, args.out_dir)
 
     summary = summarize(d_str, d_sty, args.collapse_threshold)
     with (args.out_dir / "training_mechanism_summary.csv").open("w", newline="") as f:

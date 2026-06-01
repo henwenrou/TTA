@@ -131,7 +131,8 @@ if [[ "${RUN_TRAINING_CURVES}" == "1" ]]; then
     --exp_dir "${CKPT_DIR}/${SOURCE}/${FULL_EXP}" \
     --out_dir "${OUT_DIR}/figures/training_curves" \
     --smooth "${CURVE_SMOOTH:-5}" \
-    --collapse_threshold "${STYLE_COLLAPSE_THRESHOLD:-0.02}"
+    --collapse_threshold "${STYLE_COLLAPSE_THRESHOLD:-0.02}" \
+    --epoch_points "${DIAGNOSTIC_EPOCH_POINTS:-0,50,100,final}"
 fi
 
 echo "Done. Results: ${OUT_DIR}"

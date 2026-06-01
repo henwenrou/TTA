@@ -11,8 +11,10 @@ from __future__ import annotations
 import argparse
 import csv
 from datetime import datetime
+import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -36,6 +38,8 @@ def parse_args() -> argparse.Namespace:
                         help="Directory for summary files and subprocess logs.")
     parser.add_argument("--skip-existing", action="store_true",
                         help="Reuse an existing cost_profile.csv when present.")
+    parser.add_argument("--gpu-poll-interval", type=float, default=0.5,
+                        help="Seconds between nvidia-smi GPU-memory samples.")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
     return parser.parse_args()
 
@@ -46,23 +50,66 @@ def dataset_config(dataset: str) -> dict[str, str | int]:
     return {"nclass": 5, "sgf_grid_size": 3}
 
 
-def run_command(cmd: list[str], cwd: Path, log_path: Path, dry_run: bool) -> None:
+def query_gpu_memory_gb(gpu_id: str) -> float | None:
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.used",
+                "--format=csv,noheader,nounits",
+                "-i",
+                gpu_id,
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        return None
+    if result.returncode != 0:
+        return None
+    try:
+        first_value = result.stdout.strip().splitlines()[0].strip()
+        return float(first_value) / 1024.0
+    except (ValueError, IndexError):
+        return None
+
+
+def run_command(
+    cmd: list[str],
+    cwd: Path,
+    log_path: Path,
+    dry_run: bool,
+    gpu_id: str,
+    poll_interval: float,
+) -> float | None:
     printable = " ".join(cmd)
     print(f"\n[run] cwd={cwd}")
     print(printable)
     if dry_run:
-        return
+        return None
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("w") as log_file:
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             cwd=str(cwd),
             stdout=log_file,
             stderr=subprocess.STDOUT,
             text=True,
         )
+        peak_mem_gb = query_gpu_memory_gb(gpu_id)
+        while proc.poll() is None:
+            current_mem_gb = query_gpu_memory_gb(gpu_id)
+            if current_mem_gb is not None:
+                peak_mem_gb = current_mem_gb if peak_mem_gb is None else max(peak_mem_gb, current_mem_gb)
+            time.sleep(max(poll_interval, 0.1))
+        current_mem_gb = query_gpu_memory_gb(gpu_id)
+        if current_mem_gb is not None:
+            peak_mem_gb = current_mem_gb if peak_mem_gb is None else max(peak_mem_gb, current_mem_gb)
     if proc.returncode != 0:
         raise RuntimeError(f"Command failed with exit code {proc.returncode}. See log: {log_path}")
+    return peak_mem_gb
 
 
 def profile_csv_path(root: Path, source: str, expname: str) -> Path:
@@ -157,8 +204,6 @@ def build_saa_command(root: Path, args: argparse.Namespace, expname: str, cfg: d
 def build_dcon_command(args: argparse.Namespace, expname: str, cfg: dict[str, str | int]) -> list[str]:
     return [
         sys.executable, "train.py",
-        "--profile_cost", "1",
-        "--profile_method", "DCON",
         "--expname", expname,
         "--phase", "train",
         "--gpu_ids", args.gpu,
@@ -198,7 +243,34 @@ def build_dcon_command(args: argparse.Namespace, expname: str, cfg: dict[str, st
     ]
 
 
-def summarize_profile(path: Path, method: str, warmup_epochs: int) -> dict[str, str | float]:
+def write_dcon_profile_from_log(log_path: Path, profile_path: Path, peak_mem_gb: float | None) -> None:
+    pattern = re.compile(r"End of epoch\s+(\d+)\s*/\s*\d+\s+Time Taken:\s*([0-9.]+)\s+sec")
+    rows = []
+    for line in log_path.read_text(errors="replace").splitlines():
+        match = pattern.search(line)
+        if match:
+            rows.append({
+                "method": "DCON",
+                "epoch": int(match.group(1)),
+                "train_time_sec": float(match.group(2)),
+                "peak_mem_gb": peak_mem_gb if peak_mem_gb is not None else 0.0,
+            })
+    if not rows:
+        raise RuntimeError(f"Could not parse DCON epoch timing from log: {log_path}")
+
+    profile_path.parent.mkdir(parents=True, exist_ok=True)
+    with profile_path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=["method", "epoch", "train_time_sec", "peak_mem_gb"])
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def summarize_profile(
+    path: Path,
+    method: str,
+    warmup_epochs: int,
+    external_peak_mem_gb: float | None = None,
+) -> dict[str, str | float]:
     if not path.exists():
         raise FileNotFoundError(f"Missing profile CSV for {method}: {path}")
     with path.open() as f:
@@ -206,7 +278,11 @@ def summarize_profile(path: Path, method: str, warmup_epochs: int) -> dict[str, 
     if not rows:
         raise ValueError(f"Empty profile CSV for {method}: {path}")
 
-    kept = [row for row in rows if int(row["epoch"]) > warmup_epochs]
+    last_epoch = max(int(row["epoch"]) for row in rows)
+    kept = [
+        row for row in rows
+        if int(row["epoch"]) > warmup_epochs and (len(rows) <= warmup_epochs + 1 or int(row["epoch"]) < last_epoch)
+    ]
     if not kept:
         kept = rows
 
@@ -215,7 +291,7 @@ def summarize_profile(path: Path, method: str, warmup_epochs: int) -> dict[str, 
     return {
         "Method": method,
         "Train time / epoch (s)": sum(times) / len(times),
-        "GPU memory (GB)": max(mems),
+        "GPU memory (GB)": external_peak_mem_gb if external_peak_mem_gb is not None else max(mems),
         "Inference cost": "1.0x",
         "Profile CSV": str(path),
     }
@@ -274,6 +350,7 @@ def main() -> None:
     }
 
     summaries = []
+    monitor_peaks = {}
     for method in args.methods:
         spec = method_specs[method]
         expname = spec["expname"]
@@ -282,9 +359,24 @@ def main() -> None:
             print(f"\n[skip] Reusing existing {method} profile: {profile_path}")
         else:
             cmd = spec["command"](expname)
-            run_command(cmd, Path(spec["cwd"]), out_dir / f"{method.lower()}.log", args.dry_run)
+            log_path = out_dir / f"{method.lower()}.log"
+            monitor_peaks[method] = run_command(
+                cmd,
+                Path(spec["cwd"]),
+                log_path,
+                args.dry_run,
+                args.gpu,
+                args.gpu_poll_interval,
+            )
+            if method == "DCON" and not args.dry_run:
+                write_dcon_profile_from_log(log_path, profile_path, monitor_peaks[method])
         if not args.dry_run:
-            summaries.append(summarize_profile(profile_path, method, args.warmup_epochs))
+            summaries.append(summarize_profile(
+                profile_path,
+                method,
+                args.warmup_epochs,
+                external_peak_mem_gb=monitor_peaks.get(method),
+            ))
 
     if not args.dry_run:
         write_summary(summaries, out_dir)

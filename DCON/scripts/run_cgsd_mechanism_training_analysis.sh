@@ -22,6 +22,7 @@ MAX_SLICES="${MAX_SLICES:-120}"
 NUM_VISUAL_CASES="${NUM_VISUAL_CASES:-3}"
 RUN_TRAIN="${RUN_TRAIN:-1}"
 RUN_ANALYSIS="${RUN_ANALYSIS:-1}"
+RUN_TRAINING_CURVES="${RUN_TRAINING_CURVES:-1}"
 
 if [[ "${DATA_NAME}" == "CARDIAC" ]]; then
   NCLASS=4
@@ -122,6 +123,15 @@ if [[ "${RUN_ANALYSIS}" == "1" ]]; then
     --max_slices "${MAX_SLICES}" \
     --num_visual_cases "${NUM_VISUAL_CASES}" \
     --out_dir "${OUT_DIR}"
+fi
+
+if [[ "${RUN_TRAINING_CURVES}" == "1" ]]; then
+  echo "Plotting training-time CGSD mechanism curves: ${FULL_EXP}"
+  python tools/plot_training_mechanism_curves.py \
+    --exp_dir "${CKPT_DIR}/${SOURCE}/${FULL_EXP}" \
+    --out_dir "${OUT_DIR}/figures/training_curves" \
+    --smooth "${CURVE_SMOOTH:-5}" \
+    --collapse_threshold "${STYLE_COLLAPSE_THRESHOLD:-0.02}"
 fi
 
 echo "Done. Results: ${OUT_DIR}"

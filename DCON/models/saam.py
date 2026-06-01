@@ -320,11 +320,12 @@ def compute_saam_loss(q_0, q_1, q_2, mask, W, lambda_01=1.0, lambda_02=1.0):
     dist_01 = 1.0 - cos_01  # [B, H, W]
     dist_02 = 1.0 - cos_02  # [B, H, W]
 
-    # Apply foreground filter and SAAM weights: M * W
+    # Apply the caller-provided final alignment gate. In the default SAAM path
+    # this is M * W; ablations may pass A directly with W=1.
     weight = mask * W  # [B, H, W]
 
     # Weighted alignment loss
-    # L_01 = sum(M * W * dist_01) / (sum(M * W) + eps)
+    # L_01 = sum(A * dist_01) / (sum(A) + eps)
     eps = 1e-8
 
     numerator_01 = (weight * dist_01).sum()

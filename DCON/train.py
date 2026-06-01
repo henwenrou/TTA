@@ -813,6 +813,10 @@ def get_args():
     parser.add_argument('--saam_weight_type', type=str, default='stability',
                         choices=['stability', 'entropy', 'confidence', 'uniform', 'foreground_only'],
                         help='SAAM alignment weight source. stability keeps the original feature-stability gate.')
+    parser.add_argument('--saam_mask_ablation', type=str, default='w_times_m',
+                        choices=['uniform_align', 'm_only', 'w_only', 'w_times_m'],
+                        help='SAAM foreground-prior ablation for final alignment weight A: '
+                             'uniform_align=A=1, m_only=A=M, w_only=A=W, w_times_m=A=W*M.')
     parser.add_argument('--uncertainty_tau', type=float, default=0.5,
                         help='Temperature tau for entropy-based prediction uncertainty weighting.')
     parser.add_argument('--uncertainty_view_mode', type=str, default='anchor_only',
@@ -910,6 +914,11 @@ def get_args():
         raise ValueError(f"Invalid saam_topk={args.saam_topk}. Must be in (0, 1]")
     if args.saam_tau <= 0:
         raise ValueError(f"Invalid saam_tau={args.saam_tau}. Must be > 0")
+    if args.saam_mask_ablation not in ['uniform_align', 'm_only', 'w_only', 'w_times_m']:
+        raise ValueError(
+            "saam_mask_ablation must be one of "
+            "['uniform_align', 'm_only', 'w_only', 'w_times_m']"
+        )
     if args.saam_warmup_epochs < 0:
         raise ValueError("saam_warmup_epochs must be >= 0")
     if args.saam_rampup_epochs <= 0:
@@ -1317,6 +1326,7 @@ if __name__ == '__main__':
         logging.info("saam_topk: "+str(opt.saam_topk))
         logging.info("saam_stability_mode: "+str(opt.saam_stability_mode))
         logging.info("saam_weight_type: "+str(opt.saam_weight_type))
+        logging.info("saam_mask_ablation: "+str(opt.saam_mask_ablation))
         logging.info("uncertainty_tau: "+str(opt.uncertainty_tau))
         logging.info("uncertainty_view_mode: "+str(opt.uncertainty_view_mode))
         logging.info("lambda_01: "+str(opt.lambda_01))
@@ -2159,12 +2169,15 @@ if __name__ == '__main__':
                             log_str += "topk:{:.2%} ".format(stats.get('topk_selected_ratio', 0))
                         log_str += "eff_pix:{:.1f} ".format(stats.get('effective_pixels', 0))
                         log_str += (
-                            "saam_weight_type:{} uncertainty_view_mode:{} "
-                            "mean_weight:{:.6f} min_weight:{:.6f} max_weight:{:.6f} "
+                            "saam_weight_type:{} saam_mask_ablation:{} uncertainty_view_mode:{} "
+                            "mean_W:{:.6f} mean_M:{:.6f} mean_A:{:.6f} min_A:{:.6f} max_A:{:.6f} "
                             "alignment_loss:{:.6f} "
                         ).format(
                             stats.get('saam_weight_type', getattr(opt, 'saam_weight_type', 'stability')),
+                            stats.get('saam_mask_ablation', getattr(opt, 'saam_mask_ablation', 'w_times_m')),
                             stats.get('uncertainty_view_mode', getattr(opt, 'uncertainty_view_mode', 'anchor_only')),
+                            stats.get('W_mean', 0.0),
+                            stats.get('M_mean', 0.0),
                             stats.get('alignment_weight_mean', 0.0),
                             stats.get('alignment_weight_min', 0.0),
                             stats.get('alignment_weight_max', 0.0),

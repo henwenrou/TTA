@@ -271,6 +271,7 @@ class Train_process():
                 f"SAAM initialized: tau={opt.saam_tau}, topk={opt.saam_topk}, "
                 f"mode={opt.saam_stability_mode}, "
                 f"weight_type={getattr(opt, 'saam_weight_type', 'stability')}, "
+                f"mask_ablation={getattr(opt, 'saam_mask_ablation', 'w_times_m')}, "
                 f"uncertainty_tau={getattr(opt, 'uncertainty_tau', 0.5)}, "
                 f"uncertainty_view_mode={getattr(opt, 'uncertainty_view_mode', 'anchor_only')}"
             )
@@ -2353,7 +2354,11 @@ class Train_process():
                 'lambda_02': 0.0,
                 'status': 'warmup',
                 'saam_weight_type': str(getattr(self.opt, 'saam_weight_type', 'stability')).lower(),
+                'saam_mask_ablation': str(getattr(self.opt, 'saam_mask_ablation', 'w_times_m')).lower(),
                 'uncertainty_view_mode': str(getattr(self.opt, 'uncertainty_view_mode', 'anchor_only')).lower(),
+                'W_mean': 0.0,
+                'M_mean': 0.0,
+                'A_mean': 0.0,
                 'alignment_weight_mean': 0.0,
                 'alignment_weight_min': 0.0,
                 'alignment_weight_max': 0.0,
@@ -2393,23 +2398,65 @@ class Train_process():
         mask_coverage = (mask.sum() / mask.numel()).item()
 
         saam_weight_type = str(getattr(self.opt, 'saam_weight_type', 'stability')).lower()
+        saam_mask_ablation = str(getattr(self.opt, 'saam_mask_ablation', 'w_times_m')).lower()
         uncertainty_view_mode = str(getattr(self.opt, 'uncertainty_view_mode', 'anchor_only')).lower()
         allowed_weight_types = ['stability', 'entropy', 'confidence', 'uniform', 'foreground_only']
         if saam_weight_type not in allowed_weight_types:
             raise ValueError(f"saam_weight_type must be one of {allowed_weight_types}, got {saam_weight_type}")
+        allowed_mask_ablations = ['uniform_align', 'm_only', 'w_only', 'w_times_m']
+        if saam_mask_ablation not in allowed_mask_ablations:
+            raise ValueError(
+                f"saam_mask_ablation must be one of {allowed_mask_ablations}, got {saam_mask_ablation}"
+            )
         if uncertainty_view_mode not in ['anchor_only', 'tri_view_mean']:
             raise ValueError(
                 f"uncertainty_view_mode must be anchor_only or tri_view_mean, got {uncertainty_view_mode}"
             )
 
         if saam_weight_type == 'stability':
-            # Keep the original SAAM path byte-for-byte in behavior: stability is
-            # computed from deep features, then upsampled to the mask/q resolution.
+            # Foreground-prior ablation: keep the original stability W and
+            # foreground union M, then isolate only the final alignment weight A.
             q_0_loss = F.interpolate(q_0, size=[H, W], mode="bilinear", align_corners=False)
             q_1_loss = F.interpolate(q_1, size=[H, W], mode="bilinear", align_corners=False)
             q_2_loss = F.interpolate(q_2, size=[H, W], mode="bilinear", align_corners=False)
-            W_loss, stats = self.saam_module(encf_0, encf_1, encf_2, mask_size=(H, W))
-            mask_loss = mask
+            feature_size = q_0_loss.shape[2:]
+
+            W_low, stats = self.saam_module(encf_0, encf_1, encf_2, mask_size=feature_size)
+            if W_low.dim() == 4:
+                W_low = W_low.squeeze(1)
+            if W_low.shape[-2:] != feature_size:
+                W_low = F.interpolate(
+                    W_low.unsqueeze(1),
+                    size=feature_size,
+                    mode="bilinear",
+                    align_corners=False,
+                ).squeeze(1)
+            W_low = W_low.to(dtype=q_0.dtype)
+
+            M_low = mask
+            if M_low.dim() == 4:
+                M_low = M_low.squeeze(1)
+            if M_low.shape[-2:] != feature_size:
+                M_low = F.interpolate(
+                    M_low.unsqueeze(1).float(),
+                    size=feature_size,
+                    mode="nearest",
+                ).squeeze(1)
+            M_low = M_low.to(device=q_0.device, dtype=q_0.dtype)
+
+            if saam_mask_ablation == 'uniform_align':
+                A_loss = torch.ones_like(W_low)
+            elif saam_mask_ablation == 'm_only':
+                A_loss = M_low
+            elif saam_mask_ablation == 'w_only':
+                A_loss = W_low
+            else:
+                A_loss = W_low * M_low
+
+            mask_loss = A_loss
+            W_loss = torch.ones_like(A_loss)
+            W_for_stats = W_low
+            M_for_stats = M_low
         else:
             # Prediction-level variants are evaluated on the deep alignment grid.
             feature_size = q_0.shape[2:]
@@ -2442,6 +2489,8 @@ class Train_process():
                 mask_loss = mask_low.to(dtype=q_0.dtype)
 
             stats = {}
+            W_for_stats = W_loss
+            M_for_stats = mask_loss
 
         L_align, L_01, L_02, effective_pixels = compute_saam_loss(
             q_0_loss, q_1_loss, q_2_loss, mask_loss, W_loss,
@@ -2458,7 +2507,13 @@ class Train_process():
         with torch.no_grad():
             final_weight = (mask_loss * W_loss).detach()
             self.saam_stats['saam_weight_type'] = saam_weight_type
+            self.saam_stats['saam_mask_ablation'] = saam_mask_ablation
             self.saam_stats['uncertainty_view_mode'] = uncertainty_view_mode
+            self.saam_stats['W_mean'] = W_for_stats.detach().mean().item()
+            self.saam_stats['M_mean'] = M_for_stats.detach().mean().item()
+            self.saam_stats['A_mean'] = final_weight.mean().item()
+            self.saam_stats['A_min'] = final_weight.min().item()
+            self.saam_stats['A_max'] = final_weight.max().item()
             self.saam_stats['alignment_weight_mean'] = final_weight.mean().item()
             self.saam_stats['alignment_weight_min'] = final_weight.min().item()
             self.saam_stats['alignment_weight_max'] = final_weight.max().item()

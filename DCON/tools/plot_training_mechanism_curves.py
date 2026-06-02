@@ -26,6 +26,10 @@ def parse_args():
                         help="Style branch is flagged as collapsed if late d_sty is below this.")
     parser.add_argument("--epoch_points", type=str, default="0,50,100,final",
                         help="Epoch rows for the diagnostic table, e.g. 0,50,100,final.")
+    parser.add_argument("--min_iter", type=float, default=0.0,
+                        help="Only plot per-iteration samples with iteration >= this value.")
+    parser.add_argument("--min_epoch", type=int, default=0,
+                        help="Only use epoch-summary rows with epoch >= this value.")
     return parser.parse_args()
 
 
@@ -111,6 +115,13 @@ def select_epoch_rows(rows, spec):
     return selected
 
 
+def filter_by_min_iter(steps, values, min_iter):
+    if values.size == 0 or min_iter <= 0:
+        return steps, values
+    keep = steps >= float(min_iter)
+    return steps[keep], values[keep]
+
+
 def smooth_values(values, window):
     if window <= 1 or values.size < window:
         return values
@@ -126,6 +137,21 @@ def plot_two_curves(x, y1, y2, label1, label2, title, ylabel, out_path, smooth=1
     if y2.size:
         ax.plot(x[: y2.size], y2, alpha=0.35, linewidth=1.0, color="#d62728")
         ax.plot(x[: y2.size], smooth_values(y2, smooth), label=label2, linewidth=1.8, color="#d62728")
+    ax.set_title(title)
+    ax.set_xlabel("Training iteration")
+    ax.set_ylabel(ylabel)
+    ax.grid(alpha=0.25)
+    ax.legend()
+    fig.savefig(out_path, dpi=180)
+    plt.close(fig)
+
+
+def plot_single_curve(x, y, label, title, ylabel, out_path, smooth=1, color="#1f77b4"):
+    if y.size == 0:
+        return
+    fig, ax = plt.subplots(figsize=(8.5, 4.2), constrained_layout=True)
+    ax.plot(x[: y.size], y, alpha=0.35, linewidth=1.0, color=color)
+    ax.plot(x[: y.size], smooth_values(y, smooth), label=label, linewidth=1.8, color=color)
     ax.set_title(title)
     ax.set_xlabel("Training iteration")
     ax.set_ylabel(ylabel)
@@ -214,10 +240,12 @@ def main():
 
     steps_str, d_str = read_metric_csv(metric_dir / "mechanism_d_str.csv")
     steps_sty, d_sty = read_metric_csv(metric_dir / "mechanism_d_sty.csv")
+    steps_str, d_str = filter_by_min_iter(steps_str, d_str, args.min_iter)
+    steps_sty, d_sty = filter_by_min_iter(steps_sty, d_sty, args.min_iter)
     if d_str.size == 0 and d_sty.size == 0:
         raise FileNotFoundError(
             f"No mechanism_d_str.csv or mechanism_d_sty.csv found in {metric_dir}. "
-            "Train with --mechanism_log_interval > 0 and --use_cgsd 1."
+            "Train with --cgsd_distance_log_interval > 0 and --use_cgsd 1."
         )
 
     x = steps_sty if steps_sty.size else steps_str
@@ -232,9 +260,44 @@ def main():
         out_path=args.out_dir / "training_d_str_d_sty_curve.png",
         smooth=args.smooth,
     )
+    plot_single_curve(
+        x=steps_str if steps_str.size else x,
+        y=d_str,
+        label="d_str",
+        title="Structure Branch Distance During Training",
+        ylabel="Cosine distance",
+        out_path=args.out_dir / "training_d_str_curve.png",
+        smooth=args.smooth,
+        color="#1f77b4",
+    )
+    plot_single_curve(
+        x=steps_sty if steps_sty.size else x,
+        y=d_sty,
+        label="d_sty",
+        title="Style Branch Distance During Training",
+        ylabel="Cosine distance",
+        out_path=args.out_dir / "training_d_sty_curve.png",
+        smooth=args.smooth,
+        color="#d62728",
+    )
+    if d_str.size and d_sty.size:
+        n = min(d_str.size, d_sty.size, x.size)
+        plot_single_curve(
+            x=x[:n],
+            y=(d_sty[:n] - d_str[:n]),
+            label="d_sty - d_str",
+            title="Style-Structure Distance Gap During Training",
+            ylabel="Cosine distance gap",
+            out_path=args.out_dir / "training_d_sty_minus_d_str_curve.png",
+            smooth=args.smooth,
+            color="#2ca02c",
+        )
     plot_region_curves(metric_dir, args.out_dir, args.smooth)
 
-    epoch_rows = read_epoch_summary(metric_dir / "mechanism_epoch_summary.csv")
+    epoch_rows = [
+        row for row in read_epoch_summary(metric_dir / "mechanism_epoch_summary.csv")
+        if int(row.get("epoch", 0)) >= int(args.min_epoch)
+    ]
     diagnostic_rows = select_epoch_rows(epoch_rows, args.epoch_points)
     plot_epoch_diagnostic(diagnostic_rows, args.out_dir)
 

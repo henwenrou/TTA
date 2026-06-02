@@ -28,7 +28,18 @@ from utils.prototype import export_source_prototypes
 
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from tensorboardX import SummaryWriter
+try:
+    from tensorboardX import SummaryWriter
+except ImportError:
+    class SummaryWriter:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def add_scalar(self, *args, **kwargs):
+            pass
+
+        def close(self):
+            pass
 import logging
 from datetime import datetime
 import dataloaders.AbdominalDataset as ABD
@@ -338,6 +349,38 @@ def write_cost_profile_row(logdir, method, epoch, train_time_sec, peak_mem_gb):
         f.write(f'{method},{epoch},{train_time_sec:.6f},{peak_mem_gb:.6f}\n')
 
 
+def _profile_output_dir(opt, logdir):
+    out_dir = getattr(opt, 'profile_output_dir', None)
+    if out_dir is None:
+        return logdir
+    out_dir = osp.abspath(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    return out_dir
+
+
+def write_aug_profile_row(opt, logdir, method, epoch, iteration, aug_time_ms):
+    profile_path = osp.join(_profile_output_dir(opt, logdir), 'aug_time_per_batch.csv')
+    write_header = not osp.exists(profile_path)
+    with open(profile_path, 'a') as f:
+        if write_header:
+            f.write('method,epoch,iter,aug_time_ms\n')
+        f.write(f'{method},{epoch},{iteration},{aug_time_ms:.6f}\n')
+
+
+def write_compare_epoch_profile_row(opt, logdir, method, epoch, train_time_sec, peak_mem_gb, dice):
+    profile_path = osp.join(_profile_output_dir(opt, logdir), 'train_time_per_epoch.csv')
+    write_header = not osp.exists(profile_path)
+    with open(profile_path, 'a') as f:
+        if write_header:
+            f.write('method,epoch,train_time_sec,peak_gpu_mem_gb,dice\n')
+        f.write(f'{method},{epoch},{train_time_sec:.6f},{peak_mem_gb:.6f},{dice:.6f}\n')
+
+
+def local_aug_method_label(opt):
+    aug_type = getattr(opt, 'local_aug_type', 'lla')
+    return {'lla': 'LLA', 'clp': 'CLP', 'none': 'none'}.get(aug_type, aug_type)
+
+
 def get_args():
     parser = argparse.ArgumentParser()
 
@@ -358,6 +401,10 @@ def get_args():
                         help='Profile training time and peak GPU memory only; skip validation, saving, and final testing.')
     parser.add_argument('--profile_method', type=str, default=None,
                         help='Method label written to cost_profile.csv.')
+    parser.add_argument('--profile_output_dir', type=str, default=None,
+                        help='Optional directory for compare_lla_clp profiling CSVs.')
+    parser.add_argument('--profile_max_iters', type=int, default=0,
+                        help='If >0, stop each profiling epoch after this many accepted training batches.')
     parser.add_argument('--erm_only', type=int, default=0,
                         help='Run strict ERM profiling: one supervised single-view U-Net update per batch.')
 
@@ -766,8 +813,22 @@ def get_args():
     parser.add_argument('--w_ce', type=float, default=1.0, help='w_ce')
     parser.add_argument('--w_dice', type=float, default=1.0, help='w_dice')
     parser.add_argument('--w_seg', type=float, default=1.0, help='w_seg')
-    # GIP/CLP is always enabled in the dataset pipeline; --use_sgf only controls
-    # whether the strong view is fused as SGF(GIP, CLP) or uses CLP directly.
+    parser.add_argument('--local_aug_type', type=str, default='lla', choices=['lla', 'clp', 'none'],
+                        help='Local strong-view augmentation: lla=Bezier location-scale, clp=class affine, none=no local perturbation.')
+    parser.add_argument('--clp_alpha_min', type=float, default=0.75,
+                        help='CLP class-wise alpha lower bound.')
+    parser.add_argument('--clp_alpha_max', type=float, default=1.25,
+                        help='CLP class-wise alpha upper bound.')
+    parser.add_argument('--clp_beta_min', type=float, default=-0.15,
+                        help='CLP class-wise beta lower bound.')
+    parser.add_argument('--clp_beta_max', type=float, default=0.15,
+                        help='CLP class-wise beta upper bound.')
+    parser.add_argument('--clp_perturb_background', type=int, default=1,
+                        help='Perturb background class in CLP: 1=on, 0=keep background unchanged.')
+    parser.add_argument('--clp_seed', type=int, default=None,
+                        help='Optional standalone CLP seed. Default uses the process/DataLoader seed.')
+    # GIP is always used as the base view; --local_aug_type controls the
+    # local strong-view seed before optional SGF fusion.
     parser.add_argument('--use_sgf', type=int, default=0,
                         help='Use saliency-guided fusion (SGF) for strong-view construction')
     parser.add_argument('--sgf_grid_size', type=int, default=8,
@@ -852,12 +913,20 @@ def get_args():
     parser.add_argument('--mechanism_log_interval', type=int, default=0,
                         help='If >0, log CGSD-SAAM mechanism scalar metrics every N training iterations. '
                              'This is analysis-only and does not affect optimization.')
+    parser.add_argument('--cgsd_distance_log_interval', type=int, default=0,
+                        help='If >0, log only CGSD d_str/d_sty every N training iterations. '
+                             'This skips region masks and is analysis-only.')
     parser.add_argument('--mechanism_morph_kernel', type=int, default=3, choices=[3, 5],
                         help='Morphological kernel size for online core/boundary/background metrics.')
 
     # RCCS parameters
     parser.add_argument('--use_rccs', type=int, default=0,
                         help='Enable RCCS random-convolution candidate selection: 1=on, 0=off (default: 0)')
+    parser.add_argument('--rccs_select', type=str, default='min',
+                        choices=['none', 'random', 'min', 'max'],
+                        help='RCCS candidate selection rule: none disables RCCS after CLP/SGF; '
+                             'random picks a random candidate; min/max select by cosine distance '
+                             '(default: min)')
     parser.add_argument('--p_rccs', type=float, default=0.3,
                         help='Probability of applying RCCS to the strong view (default: 0.3)')
     parser.add_argument('--rccs_candidates', type=int, default=4,
@@ -896,6 +965,9 @@ def get_args():
 
     # Validate RCCS parameters
     if hasattr(args, 'use_rccs') and args.use_rccs:
+        if args.rccs_select == 'none':
+            args.use_rccs = 0
+
         # Validate p_rccs
         if not (0.0 <= args.p_rccs <= 1.0):
             raise ValueError(f"Invalid p_rccs={args.p_rccs}. Must be in [0, 1]")
@@ -1247,6 +1319,12 @@ def get_args():
         raise ValueError("phase must be train, test, or export_source_prototypes")
     if args.phase != 'test' and args.tta != 'none':
         raise ValueError("TTA is only supported with --phase test in this DCON entry point.")
+    if args.clp_alpha_min > args.clp_alpha_max:
+        raise ValueError("clp_alpha_min must be <= clp_alpha_max")
+    if args.clp_beta_min > args.clp_beta_max:
+        raise ValueError("clp_beta_min must be <= clp_beta_max")
+    if args.profile_max_iters < 0:
+        raise ValueError("profile_max_iters must be >= 0")
 
     return args
     
@@ -1257,14 +1335,15 @@ if __name__ == '__main__':
     opt=get_args()
     os.environ['CUDA_VISIBLE_DEVICES'] = opt.gpu_ids
 
-    print("Dataset pipeline: base view uses GIP; strong view uses CLP or SGF(GIP, CLP).")
+    local_method = local_aug_method_label(opt)
+    print(f"Dataset pipeline: base view uses GIP; strong view seed uses {local_method}.")
     if opt.use_sgf:
-        print("SGF enabled: base view uses GIP, strong view uses SGF(GIP, CLP)")
-        print("SGF inputs (GIP/CLP) use intensity transforms after shared geometry")
+        print(f"SGF enabled: base view uses GIP, strong view uses SGF(GIP, {local_method})")
+        print(f"SGF inputs (GIP/{local_method}) use intensity transforms after shared geometry")
         if opt.sgf_view2_only:
             print("SGF view2-only: base view disabled; SAAM and pairwise CGSD losses are skipped")
     else:
-        print("SGF disabled: strong view uses CLP directly.")
+        print(f"SGF disabled: strong view uses {local_method} directly.")
 
     cudnn.benchmark = False
     cudnn.deterministic = True
@@ -1328,7 +1407,15 @@ if __name__ == '__main__':
     logging.info("config:"+str(opt))
     logging.info("name:"+opt.expname)
     logging.info("use_cgsd:"+str(opt.use_cgsd))
-    logging.info("view_pipeline:"+("GIP->SGF(GIP,CLP)" if opt.use_sgf else "GIP->CLP"))
+    logging.info("local_aug_type:"+str(opt.local_aug_type))
+    logging.info("view_pipeline:"+(
+        f"GIP->SGF(GIP,{local_method})" if opt.use_sgf else f"GIP->{local_method}"
+    ))
+    if opt.local_aug_type == 'clp':
+        logging.info("clp_alpha_range:"+str((opt.clp_alpha_min, opt.clp_alpha_max)))
+        logging.info("clp_beta_range:"+str((opt.clp_beta_min, opt.clp_beta_max)))
+        logging.info("clp_perturb_background:"+str(opt.clp_perturb_background))
+        logging.info("clp_seed:"+str(opt.clp_seed))
     if opt.use_cgsd:
         logging.info("lambda_str:"+str(opt.lambda_str))
         logging.info("lambda_sty:"+str(opt.lambda_sty))
@@ -1351,12 +1438,14 @@ if __name__ == '__main__':
         logging.info("anchor_seg_alpha:"+str(opt.anchor_seg_alpha))
         logging.info("strong_seg_alpha:"+str(opt.strong_seg_alpha))
         logging.info("mechanism_log_interval:"+str(opt.mechanism_log_interval))
+        logging.info("cgsd_distance_log_interval:"+str(opt.cgsd_distance_log_interval))
         logging.info("mechanism_morph_kernel:"+str(opt.mechanism_morph_kernel))
 
     # RCCS Configuration logging
     if hasattr(opt, 'use_rccs') and opt.use_rccs:
         logging.info("=== RCCS Configuration ===")
         logging.info("use_rccs: "+str(opt.use_rccs))
+        logging.info("rccs_select: "+str(opt.rccs_select))
         logging.info("p_rccs: "+str(opt.p_rccs))
         logging.info("rccs_candidates: "+str(opt.rccs_candidates))
         logging.info("rccs_metric: "+str(opt.rccs_metric))
@@ -1366,6 +1455,9 @@ if __name__ == '__main__':
         logging.info("rccs_apply_to_saam: "+str(opt.rccs_apply_to_saam))
         logging.info("rccs_apply_to_base: "+str(opt.rccs_apply_to_base))
         logging.info("rccs_embed_dim: "+str(opt.rccs_embed_dim))
+    else:
+        logging.info("use_rccs: "+str(getattr(opt, 'use_rccs', 0)))
+        logging.info("rccs_select: "+str(getattr(opt, 'rccs_select', 'min')))
 
     logging.info("opt.f_seed:"+str(opt.f_seed))
     logging.info("data:"+opt.data_name)
@@ -2110,6 +2202,7 @@ if __name__ == '__main__':
     total_steps,iternum = 0,0
     best_val = float('-inf')
     best_epoch = -1
+    method_label = opt.profile_method or local_aug_method_label(opt)
 
     for epoch in range(1, opt.all_epoch + 1):
         if opt.profile_cost and torch.cuda.is_available():
@@ -2118,6 +2211,8 @@ if __name__ == '__main__':
         epoch_start_time = time.time()
         epoch_profile_start = time.perf_counter()
         epoch_mechanism_records = []
+        epoch_dice_values = []
+        accepted_profile_batches = 0
 
         # Training progress bar for each epoch
         train_pbar = tqdm(enumerate(train_loader), total = train_loader.dataset.size // opt.batchSize - 1,
@@ -2131,6 +2226,10 @@ if __name__ == '__main__':
                     continue
 
                 tr_log=model.tr_func(train_batch, epoch, iteration=iternum)
+                accepted_profile_batches += 1
+                if opt.profile_cost and 'aug_time_ms' in train_batch:
+                    aug_time = float(torch.as_tensor(train_batch['aug_time_ms']).sum().item())
+                    write_aug_profile_row(opt, logdir, method_label, epoch, iternum, aug_time)
 
                 for key, x in tr_log.items():
                     tb_writer.add_scalar(key, x,iternum)
@@ -2168,8 +2267,21 @@ if __name__ == '__main__':
                         postfix_dict['core_d'] = f'{model.mechanism_stats["mechanism_mean_dstab_core"]:.3f}'
                     if 'mechanism_topk_boundary_ratio' in model.mechanism_stats:
                         postfix_dict['bd_topk'] = f'{model.mechanism_stats["mechanism_topk_boundary_ratio"]:.3f}'
-                    epoch_mechanism_records.append(dict(model.mechanism_stats))
+                if getattr(model, 'cgsd_distance_stats', None):
+                    if 'mechanism_d_str' in model.cgsd_distance_stats:
+                        postfix_dict['d_str'] = f'{model.cgsd_distance_stats["mechanism_d_str"]:.3f}'
+                    if 'mechanism_d_sty' in model.cgsd_distance_stats:
+                        postfix_dict['d_sty'] = f'{model.cgsd_distance_stats["mechanism_d_sty"]:.3f}'
+                mechanism_record = {}
+                if getattr(model, 'mechanism_stats', None):
+                    mechanism_record.update(model.mechanism_stats)
+                if getattr(model, 'cgsd_distance_stats', None):
+                    mechanism_record.update(model.cgsd_distance_stats)
+                if mechanism_record:
+                    epoch_mechanism_records.append(mechanism_record)
                 train_pbar.set_postfix(postfix_dict)
+                if opt.w_dice > 0:
+                    epoch_dice_values.append(1.0 - (model.loss_dice.item() / opt.w_dice))
 
                 # Log detailed info to file only
                 log_str = "Tr-Epoch:{},Iter:{},Lr:{:.5f}--loss:{:.5f} seg:{:.5f} dc:{:.5f} ce:{:.5f} ".format(
@@ -2218,17 +2330,22 @@ if __name__ == '__main__':
                         ms.get('mechanism_topk_core_ratio', 0.0),
                         ms.get('mechanism_topk_boundary_ratio', 0.0),
                     )
-                    if 'mechanism_d_str' in ms and 'mechanism_d_sty' in ms:
-                        log_str += "mech_d_str:{:.6f} mech_d_sty:{:.6f} ".format(
-                            ms.get('mechanism_d_str', 0.0),
-                            ms.get('mechanism_d_sty', 0.0),
-                        )
+                if getattr(model, 'cgsd_distance_stats', None):
+                    ds = model.cgsd_distance_stats
+                    log_str += "mech_d_str:{:.6f} mech_d_sty:{:.6f} mech_d_gap:{:.6f} ".format(
+                        ds.get('mechanism_d_str', 0.0),
+                        ds.get('mechanism_d_sty', 0.0),
+                        ds.get('mechanism_d_sty_minus_d_str', 0.0),
+                    )
                 logger.info(log_str)
                 
     
                 if iternum % opt.display_freq == 0:
                     tr_viz = model.get_img_tr()
                     save_trimgs(tr_viz,logdir,iternum,opt,labmap)
+
+                if opt.profile_cost and opt.profile_max_iters > 0 and accepted_profile_batches >= opt.profile_max_iters:
+                    break
                    
      
  
@@ -2239,11 +2356,12 @@ if __name__ == '__main__':
             else:
                 peak_mem_gb = 0.0
             epoch_train_time = time.perf_counter() - epoch_profile_start
-            method_label = opt.profile_method or ('ERM' if opt.erm_only else ('SAA' if opt.use_saam else 'DCON'))
+            epoch_dice = float(np.mean(epoch_dice_values)) if epoch_dice_values else float('nan')
             write_cost_profile_row(logdir, method_label, epoch, epoch_train_time, peak_mem_gb)
+            write_compare_epoch_profile_row(opt, logdir, method_label, epoch, epoch_train_time, peak_mem_gb, epoch_dice)
             print(
                 f"[CostProfile] method={method_label} epoch={epoch} "
-                f"train_time={epoch_train_time:.3f}s peak_mem={peak_mem_gb:.3f}GB"
+                f"train_time={epoch_train_time:.3f}s peak_mem={peak_mem_gb:.3f}GB dice={epoch_dice:.4f}"
             )
 
         if epoch_mechanism_records:

@@ -9,6 +9,7 @@
 #   PYTHON_BIN=/path/to/python bash scripts/run_saam_mask_ablation.sh
 #   ONLY_TASKS="CARDIAC:bSSFP ABDOMINAL:SABSCT" bash scripts/run_saam_mask_ablation.sh
 #   ONLY_VARIANTS="m_only w_only" bash scripts/run_saam_mask_ablation.sh
+#   EPOCHS_OVERRIDE=20 bash scripts/run_saam_mask_ablation.sh
 #   DRY_RUN=1 bash scripts/run_saam_mask_ablation.sh
 #   FORCE=1 bash scripts/run_saam_mask_ablation.sh
 
@@ -39,6 +40,9 @@ SKIP_FINISHED="${SKIP_FINISHED:-1}"
 FORCE="${FORCE:-0}"
 DRY_RUN="${DRY_RUN:-0}"
 RUN_PREFIX="${RUN_PREFIX:-saam_mask_ablation}"
+EPOCHS_OVERRIDE="${EPOCHS_OVERRIDE:-}"
+VALIDATION_FREQ="${VALIDATION_FREQ:-50}"
+SAVE_FREQ="${SAVE_FREQ:-100}"
 
 DEFAULT_VARIANTS=(uniform_align m_only w_only w_times_m)
 if [[ -n "${ONLY_VARIANTS:-}" ]]; then
@@ -118,9 +122,9 @@ run_one() {
     --model unet
     --batchSize "${BATCH_SIZE}"
     --all_epoch "${all_epoch}"
-    --validation_freq 50
+    --validation_freq "${VALIDATION_FREQ}"
     --display_freq "${display_freq}"
-    --save_freq 100
+    --save_freq "${SAVE_FREQ}"
     --data_name "${data_name}"
     --nclass "${nclass}"
     --tr_domain "${source}"
@@ -179,6 +183,9 @@ fi
 
 for task in "${ALL_TASKS[@]}"; do
   read -r data_name nclass source all_epoch sgf_grid_size display_freq <<< "${task}"
+  if [[ -n "${EPOCHS_OVERRIDE}" ]]; then
+    all_epoch="${EPOCHS_OVERRIDE}"
+  fi
   if ! task_selected "${data_name}" "${source}"; then
     continue
   fi

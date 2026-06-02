@@ -136,13 +136,15 @@ class RandomConvCandidateSelection(nn.Module):
     RCCS wrapper.
 
     Samples multiple ProRandConv candidates from the same input, measures
-    semantic distance with `cls_net`, and returns the candidate that stays
-    closest to the original semantics.
+    semantic distance with `cls_net`, and returns a candidate according to the
+    configured selection rule.
 
     Args:
         base_aug: ProRandConvNet instance used as the candidate generator
         n_candidates: number of candidates (default: 4)
         sem_metric: semantic distance metric, "cos" or "l2" (default: "cos")
+        select_mode: candidate selection rule, "random", "min", or "max"
+            (default: "min")
         prefer_change: whether to prefer candidates with stronger appearance changes
         lambda_change: weight for the change-preference term (default: 0.0)
         change_metric: appearance-change metric (default: "l1")
@@ -153,6 +155,7 @@ class RandomConvCandidateSelection(nn.Module):
                  base_aug,
                  n_candidates=4,
                  sem_metric="cos",
+                 select_mode="min",
                  prefer_change=False,
                  lambda_change=0.0,
                  change_metric="l1",
@@ -162,6 +165,7 @@ class RandomConvCandidateSelection(nn.Module):
         self.base_aug = base_aug
         self.n_candidates = n_candidates
         self.sem_metric = sem_metric
+        self.select_mode = select_mode
         self.prefer_change = prefer_change
         self.lambda_change = lambda_change
         self.change_metric = change_metric
@@ -169,6 +173,9 @@ class RandomConvCandidateSelection(nn.Module):
 
         # Validate configuration.
         assert sem_metric in ["cos", "l2"], f"sem_metric must be 'cos' or 'l2', got {sem_metric}"
+        assert select_mode in ["random", "min", "max"], (
+            f"select_mode must be 'random', 'min', or 'max', got {select_mode}"
+        )
         assert change_metric in ["l1", "l2"], f"change_metric must be 'l1' or 'l2', got {change_metric}"
         assert n_candidates >= 1, f"n_candidates must be >= 1, got {n_candidates}"
 
@@ -258,7 +265,7 @@ class RandomConvCandidateSelection(nn.Module):
 
                 d_change_all[i] = d_change
 
-        # Select the best candidate per sample instead of sharing one index per batch.
+        # Select one candidate per sample instead of sharing one index per batch.
         if d_change_all is not None:
             scores_all = d_sem_all - self.lambda_change * d_change_all  # [N, B]
         else:
@@ -273,9 +280,21 @@ class RandomConvCandidateSelection(nn.Module):
                 "Falling back to candidate 0 for those samples.",
                 RuntimeWarning
             )
-        safe_scores_all = scores_all.clone()
-        safe_scores_all[:, ~valid_mask] = float("inf")
-        best_idx = torch.argmin(safe_scores_all, dim=0)  # [B]
+        if self.select_mode == "random":
+            best_idx = torch.randint(
+                low=0,
+                high=self.n_candidates,
+                size=(B,),
+                device=device,
+            )
+        elif self.select_mode == "max":
+            safe_scores_all = scores_all.clone()
+            safe_scores_all[:, ~valid_mask] = float("-inf")
+            best_idx = torch.argmax(safe_scores_all, dim=0)  # [B]
+        else:
+            safe_scores_all = scores_all.clone()
+            safe_scores_all[:, ~valid_mask] = float("inf")
+            best_idx = torch.argmin(safe_scores_all, dim=0)  # [B]
         best_idx = torch.where(valid_mask, best_idx, torch.zeros_like(best_idx))
 
         sample_idx = torch.arange(B, device=device)

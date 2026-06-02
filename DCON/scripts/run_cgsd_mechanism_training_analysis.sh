@@ -16,7 +16,8 @@ CKPT_DIR="${CKPT_DIR:-./ckpts}"
 ALL_EPOCH="${ALL_EPOCH:-300}"
 SAVE_FREQ="${SAVE_FREQ:-50}"
 VAL_FREQ="${VAL_FREQ:-50}"
-MECH_INTERVAL="${MECH_INTERVAL:-200}"
+MECH_INTERVAL="${MECH_INTERVAL:-100}"
+CGSD_DISTANCE_INTERVAL="${CGSD_DISTANCE_INTERVAL:-1}"
 ANALYZE_EPOCHS="${ANALYZE_EPOCHS:-50:${ALL_EPOCH}:${SAVE_FREQ}}"
 MAX_SLICES="${MAX_SLICES:-120}"
 NUM_VISUAL_CASES="${NUM_VISUAL_CASES:-3}"
@@ -85,6 +86,7 @@ COMMON_ARGS=(
   --anchor_seg_alpha 0.0
   --strong_seg_alpha 1.0
   --mechanism_log_interval "${MECH_INTERVAL}"
+  --cgsd_distance_log_interval "${CGSD_DISTANCE_INTERVAL}"
   --mechanism_morph_kernel "${MECH_KERNEL:-3}"
   --use_rccs 1
   --p_rccs "${P_RCCS:-0.3}"
@@ -132,7 +134,9 @@ if [[ "${RUN_TRAINING_CURVES}" == "1" ]]; then
     --out_dir "${OUT_DIR}/figures/training_curves" \
     --smooth "${CURVE_SMOOTH:-5}" \
     --collapse_threshold "${STYLE_COLLAPSE_THRESHOLD:-0.02}" \
-    --epoch_points "${DIAGNOSTIC_EPOCH_POINTS:-0,50,100,final}"
+    --epoch_points "${DIAGNOSTIC_EPOCH_POINTS:-0,50,100,final}" \
+    --min_iter "${CURVE_MIN_ITER:-0}" \
+    --min_epoch "${CURVE_MIN_EPOCH:-0}"
 fi
 
 echo "Done. Results: ${OUT_DIR}"

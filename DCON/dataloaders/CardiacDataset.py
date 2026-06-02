@@ -8,8 +8,9 @@ import os
 import torch.utils.data as torch_data
 import math
 import itertools
+import time
 from dataloaders.niftiio import read_nii_bysitk
-from dataloaders.location_scale_augmentation import LocationScaleAugmentation
+from dataloaders.location_scale_augmentation import ClassConditionalAffineCLP, LocationScaleAugmentation
 
 DATA_ROOT = os.environ.get(
     'SAA_DATA_ROOT',
@@ -75,10 +76,19 @@ class CardiacDataset(torch_data.Dataset):
         self.use_sgf = bool(getattr(self.opt, 'use_sgf', 0))
         self.sgf_view2_only = bool(getattr(self.opt, 'sgf_view2_only', 0)) and self.use_sgf
         self.sgf_intensity_tfx = trans.get_intensity_transformer(trans.tr_aug) if self.use_sgf else None
+        self.local_aug_type = getattr(self.opt, 'local_aug_type', 'lla')
+        self.clp_aug = None
 
         if self.is_train:
-            print(f'Applying GIP/CLP location-scale augmentation on {mode} split')
+            print(f'Applying GIP/{self.local_aug_type} local augmentation on {mode} split')
             self.location_scale = LocationScaleAugmentation(vrange=(0.,1.), background_threshold=0.01)
+            self.clp_aug = ClassConditionalAffineCLP(
+                alpha_range=(getattr(self.opt, 'clp_alpha_min', 0.75), getattr(self.opt, 'clp_alpha_max', 1.25)),
+                beta_range=(getattr(self.opt, 'clp_beta_min', -0.15), getattr(self.opt, 'clp_beta_max', 0.15)),
+                perturb_background=bool(getattr(self.opt, 'clp_perturb_background', 1)),
+                vrange=(0.0, 1.0),
+                seed=getattr(self.opt, 'clp_seed', None),
+            )
         else:
             self.location_scale = None
 
@@ -279,22 +289,32 @@ class CardiacDataset(torch_data.Dataset):
             gip = np.clip(gip, 0.0, 1.0)
             gip = self.renorm_(gip, curr_dict['vol_info'])
 
-            clp = self.location_scale.Local_Location_Scale_Augmentation(img_denorm.copy(), lb_data.astype(np.int32))
-            clp = np.clip(clp, 0.0, 1.0)
-            clp = self.renorm_(clp, curr_dict['vol_info'])
+            aug_start = time.perf_counter()
+            if self.local_aug_type == 'lla':
+                local_view = self.location_scale.Local_Location_Scale_Augmentation(
+                    img_denorm.copy(), lb_data.astype(np.int32))
+            elif self.local_aug_type == 'clp':
+                local_view = self.clp_aug(img_denorm.copy(), lb_data.astype(np.int32))
+            elif self.local_aug_type == 'none':
+                local_view = img_denorm.copy()
+            else:
+                raise ValueError(f"Unsupported local_aug_type={self.local_aug_type}")
+            aug_time_ms = (time.perf_counter() - aug_start) * 1000.0
+            local_view = np.clip(local_view, 0.0, 1.0)
+            local_view = self.renorm_(local_view, curr_dict['vol_info'])
 
-            comp = np.concatenate([curr_dict["img"], gip, clp, curr_dict["lb"]], axis=-1)
+            comp = np.concatenate([curr_dict["img"], gip, local_view, curr_dict["lb"]], axis=-1)
             timg, lb = self.transforms(comp, c_img=3, c_label=1, nclass=self.nclass, is_train=self.is_train, use_onehot=False)
-            _, gip_geo, clp_geo = np.split(timg, 3, axis=-1)
+            _, gip_geo, local_geo = np.split(timg, 3, axis=-1)
 
             if self.sgf_intensity_tfx is not None:
                 gip_geo = self.sgf_intensity_tfx(gip_geo)
-                clp_geo = self.sgf_intensity_tfx(clp_geo)
+                local_geo = self.sgf_intensity_tfx(local_geo)
 
             base_view = np.float32(gip_geo)
-            strong_view = np.float32(clp_geo)
+            strong_view = np.float32(local_geo)
             gip_geo = np.float32(gip_geo)
-            clp_geo = np.float32(clp_geo)
+            local_geo = np.float32(local_geo)
             imgori = np.float32(imgori)
             lb = np.float32(lb)
             lb = np.clip(lb, 0, self.nclass - 1)
@@ -302,14 +322,14 @@ class CardiacDataset(torch_data.Dataset):
             base_view = np.transpose(base_view, (2, 0, 1))
             strong_view = np.transpose(strong_view, (2, 0, 1))
             gip_geo = np.transpose(gip_geo, (2, 0, 1))
-            clp_geo = np.transpose(clp_geo, (2, 0, 1))
+            local_geo = np.transpose(local_geo, (2, 0, 1))
             imgori = np.transpose(imgori, (2, 0, 1))
             lb = np.transpose(lb, (2, 0, 1))
 
             base_view = torch.from_numpy(base_view)
             strong_view = torch.from_numpy(strong_view)
             gip_geo = torch.from_numpy(gip_geo)
-            clp_geo = torch.from_numpy(clp_geo)
+            local_geo = torch.from_numpy(local_geo)
             imgori = torch.from_numpy(imgori)
             lb = torch.from_numpy(lb)
 
@@ -317,13 +337,14 @@ class CardiacDataset(torch_data.Dataset):
                 base_view = base_view.repeat([self.tile_z_dim, 1, 1])
                 strong_view = strong_view.repeat([self.tile_z_dim, 1, 1])
                 gip_geo = gip_geo.repeat([self.tile_z_dim, 1, 1])
-                clp_geo = clp_geo.repeat([self.tile_z_dim, 1, 1])
+                local_geo = local_geo.repeat([self.tile_z_dim, 1, 1])
                 imgori = imgori.repeat([self.tile_z_dim, 1, 1])
 
             sample['base_view'] = base_view
             sample['strong_view'] = strong_view
             sample['label'] = lb
             sample['anchor_view'] = imgori
+            sample['aug_time_ms'] = np.float32(aug_time_ms)
 
 
         return sample

@@ -279,7 +279,8 @@ class Train_process():
             self.saam_module = None
 
         # RCCS module (if enabled)
-        if hasattr(opt, 'use_rccs') and opt.use_rccs:
+        rccs_select = getattr(opt, 'rccs_select', 'min')
+        if hasattr(opt, 'use_rccs') and opt.use_rccs and rccs_select != 'none':
             # Get image size from dataset
             # All datasets in this codebase use 192x192 resolution
             # (PROSTATE, CARDIAC, ABDOMINAL all confirmed to be 192x192)
@@ -299,6 +300,7 @@ class Train_process():
                 base_aug=self.prorandconv,
                 n_candidates=n_candidates,
                 sem_metric=sem_metric,
+                select_mode=rccs_select,
                 prefer_change=prefer_change,
                 lambda_change=lambda_change,
                 change_metric=change_metric,
@@ -327,6 +329,7 @@ class Train_process():
             print("RCCS initialized:")
             print(f"  - candidates: {n_candidates}")
             print(f"  - metric: {sem_metric}")
+            print(f"  - select: {rccs_select}")
             print(f"  - prefer_change: {prefer_change}")
             print(f"  - lambda_change: {lambda_change}")
             print(f"  - Number of parameters (ProRandConv): {rccs_params}")
@@ -2245,6 +2248,10 @@ class Train_process():
         interval = int(getattr(self.opt, 'mechanism_log_interval', 0))
         return interval > 0 and iteration is not None and iteration % interval == 0
 
+    def should_log_cgsd_distance(self, iteration):
+        interval = int(getattr(self.opt, 'cgsd_distance_log_interval', 0))
+        return interval > 0 and iteration is not None and iteration % interval == 0
+
     def compute_cgsd_distance(self, f_a, f_b):
         use_projector = (
             hasattr(self, 'projector_str') and
@@ -2259,9 +2266,20 @@ class Train_process():
             z_b = F.adaptive_avg_pool2d(f_b, 1).view(f_b.size(0), -1)
         return (1.0 - F.cosine_similarity(z_a, z_b, dim=1)).mean()
 
-    def compute_online_mechanism_stats(self, encf_0, encf_1, encf_2,
-                                       f_str_1=None, f_str_2=None,
-                                       f_sty_1=None, f_sty_2=None):
+    def compute_cgsd_distance_stats(self, f_str_1, f_str_2, f_sty_1, f_sty_2):
+        stats = {}
+        with torch.no_grad():
+            if f_str_1 is not None and f_str_2 is not None:
+                stats['mechanism_d_str'] = self.compute_cgsd_distance(f_str_1, f_str_2).item()
+            if f_sty_1 is not None and f_sty_2 is not None:
+                stats['mechanism_d_sty'] = self.compute_cgsd_distance(f_sty_1, f_sty_2).item()
+        if 'mechanism_d_str' in stats and 'mechanism_d_sty' in stats:
+            stats['mechanism_d_sty_minus_d_str'] = (
+                stats['mechanism_d_sty'] - stats['mechanism_d_str']
+            )
+        return stats
+
+    def compute_online_mechanism_stats(self, encf_0, encf_1, encf_2):
         if self.saam_module is None:
             return {}
         with torch.no_grad():
@@ -2302,13 +2320,6 @@ class Train_process():
                 'mechanism_topk_boundary_ratio': topk_ratio(boundary),
                 'mechanism_topk_background_ratio': topk_ratio(background),
             }
-
-        if f_str_1 is not None and f_str_2 is not None:
-            with torch.no_grad():
-                stats['mechanism_d_str'] = self.compute_cgsd_distance(f_str_1, f_str_2).item()
-        if f_sty_1 is not None and f_sty_2 is not None:
-            with torch.no_grad():
-                stats['mechanism_d_sty'] = self.compute_cgsd_distance(f_sty_1, f_sty_2).item()
         return stats
 
     def get_lambda_str_with_warmup(self, epoch):
@@ -2556,6 +2567,7 @@ class Train_process():
         self.loss_saam_02 = zero.clone()
         self.saam_stats = {}
         self.mechanism_stats = {}
+        self.cgsd_distance_stats = {}
         self.rccs_applied = False
         self.rccs_stats = {}
         self.rccs_applied_base = False
@@ -2725,13 +2737,12 @@ class Train_process():
 
         if use_saam and encf0 is not None and encf1 is not None and encf2 is not None:
             if self.should_log_mechanism(iteration):
-                self.mechanism_stats = self.compute_online_mechanism_stats(
-                    encf0, encf1, encf2,
-                    f_str_1=f1_str_v1,
-                    f_str_2=f1_str_v2,
-                    f_sty_1=f1_sty_v1,
-                    f_sty_2=f1_sty_v2,
-                )
+                self.mechanism_stats = self.compute_online_mechanism_stats(encf0, encf1, encf2)
+
+        if gate_on and self.should_log_cgsd_distance(iteration):
+            self.cgsd_distance_stats = self.compute_cgsd_distance_stats(
+                f1_str_v1, f1_str_v2, f1_sty_v1, f1_sty_v2
+            )
 
         if gate_on and f1_str_v1 is not None and f1_str_v2 is not None and self.opt.lambda_str > 0:
             lambda_str_cur = self.get_lambda_str_with_warmup(epoch)
@@ -2818,6 +2829,11 @@ class Train_process():
 
         if self.mechanism_stats:
             for key, val in self.mechanism_stats.items():
+                if isinstance(val, (int, float)):
+                    tr_log.append((key, torch.tensor(val, device=self.input_mask.device)))
+
+        if self.cgsd_distance_stats:
+            for key, val in self.cgsd_distance_stats.items():
                 if isinstance(val, (int, float)):
                     tr_log.append((key, torch.tensor(val, device=self.input_mask.device)))
 

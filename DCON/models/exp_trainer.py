@@ -134,6 +134,50 @@ def forward_logits(model, images):
     return output
 
 
+def build_segmentation_backbone(opt, num_classes):
+    backbone = getattr(opt, 'backbone', 'unet')
+    if getattr(opt, 'model', 'unet') != 'unet':
+        raise ValueError(f"Unsupported --model {opt.model}. DCON backbone ablations keep --model unet.")
+
+    if backbone == 'unet':
+        use_cgsd = bool(getattr(opt, 'use_cgsd', 0))
+        use_temperature = getattr(opt, 'use_temperature', 0) == 1
+        gate_tau = getattr(opt, 'gate_tau', 0.1)
+        return Unet1(
+            c=3,
+            num_classes=num_classes,
+            use_channel_gate=use_cgsd,
+            cgsd_layer=getattr(opt, 'cgsd_layer', 1),
+            use_temperature=use_temperature,
+            gate_tau=gate_tau,
+        )
+    if backbone == 'nnunet':
+        return NNUNetStyleUNet(c=3, num_classes=num_classes)
+    if backbone == 'swinunet':
+        return SwinUNetWrapper(c=3, num_classes=num_classes)
+    raise ValueError(f"Unsupported --backbone {backbone}. Expected one of: unet, nnunet, swinunet.")
+
+
+@torch.no_grad()
+def infer_backbone_feature_channels(model, input_channels=3, image_size=192):
+    if hasattr(model, 'feature_channels'):
+        return int(model.feature_channels)
+    device = next(model.parameters()).device
+    was_training = model.training
+    model.eval()
+    dummy_input = torch.randn(1, input_channels, image_size, image_size, device=device)
+    output = model(dummy_input, return_feat=False)
+    if isinstance(output, (tuple, list)) and len(output) > 1 and torch.is_tensor(output[1]):
+        channels = int(output[1].shape[1])
+    else:
+        raise RuntimeError(
+            "Backbone must return (logits, feature) so DCON alignment/TTA modules "
+            "can consume the deep feature."
+        )
+    model.train(was_training)
+    return channels
+
+
 @torch.no_grad()
 def update_ema_model(ema_model, model, momentum):
     for ema_param, param in zip(ema_model.parameters(), model.parameters()):
@@ -147,91 +191,70 @@ class Train_process():
         self.opt = opt
         self.n_cls = opt.nclass
         self.epoch=0
+        self.backbone = getattr(opt, 'backbone', 'unet')
+        self.netseg = build_segmentation_backbone(opt, self.n_cls).cuda()
+        self.feature_channels = infer_backbone_feature_channels(self.netseg)
+        use_channel_gate = bool(getattr(opt, 'use_cgsd', 0)) and bool(getattr(self.netseg, 'supports_cgsd', False))
+        cgsd_layer = getattr(opt, 'cgsd_layer', 1)
 
-        if opt.model=='unet':
-            # Mainline training always uses c=3 with tile_z_dim=3.
-            use_cgsd = bool(opt.use_cgsd)
-            use_channel_gate = use_cgsd
-            cgsd_layer = getattr(opt, 'cgsd_layer', 1)  # Default to layer 1
-
-            # CCSDG-style temperature sharpening (optional)
-            use_temperature = getattr(opt, 'use_temperature', 0) == 1
-            gate_tau = getattr(opt, 'gate_tau', 0.1)
-
-            self.netseg = Unet1(c=3, num_classes=self.n_cls,
-                               use_channel_gate=use_channel_gate,
-                               cgsd_layer=cgsd_layer,
-                               use_temperature=use_temperature,
-                               gate_tau=gate_tau)
-            self.netseg = self.netseg.cuda()
-            total_params = sum(p.numel() for p in self.netseg.parameters())
-            print(f"Number of parameters (segmentation): {total_params}")
-            if use_channel_gate:
-                channel_sizes = {1: 16, 2: 32, 3: 64}
-                gate_type = "softmax (CCSDG-style)" if use_temperature else "sigmoid"
-                print(f"CGSD enabled at encoder layer {cgsd_layer} ({channel_sizes[cgsd_layer]} channels)")
-                print(f"  - Gate type: {gate_type}")
-                if use_temperature:
-                    print(f"  - Temperature: {gate_tau}")
-            else:
-                print("CGSD disabled: model follows the old no-CGSD branch")
-
-            # Initialize the shared projector for CGSD (if enabled)
-            if use_channel_gate and getattr(opt, 'use_projector', 1) == 1:
-                # Auto-detect CGSD layer channels
-                channel_sizes = {1: 16, 2: 32, 3: 64}
-                cgsd_channels = channel_sizes[cgsd_layer]
-
-                # Get projector configuration
-                proj_dim = getattr(opt, 'proj_dim', 1024)
-                proj_hidden = getattr(opt, 'proj_hidden_channels', 8)
-
-                # Auto-detect feature map size by running dummy forward pass
-                # This ensures projector matches actual feature map dimensions
-                with torch.no_grad():
-                    # Create dummy input with shape [1, C, H, W]
-                    # Use batch size 1 to minimize memory
-                    dummy_input = torch.randn(1, 3, 192, 192).cuda()  # Typical CARDIAC image size
-                    # Forward through encoder to get feature map at cgsd_layer
-                    x1 = self.netseg.convd1(dummy_input)
-                    if cgsd_layer >= 2:
-                        x2 = self.netseg.convd2(x1)
-                        if cgsd_layer >= 3:
-                            x3 = self.netseg.convd3(x2)
-                            feature_map = x3
-                        else:
-                            feature_map = x2
-                    else:
-                        feature_map = x1
-
-                    actual_feature_size = feature_map.shape[2]  # H dimension (should equal W)
-                    print(f"Auto-detected feature map size at Layer {cgsd_layer}: {actual_feature_size}x{actual_feature_size}")
-
-                # Paper CGSD uses one shared projector phi(.) for both
-                # structure and style features.
-                from .unet import Projector
-                self.projector_str = Projector(
-                    in_channels=cgsd_channels,
-                    hidden_channels=proj_hidden,
-                    proj_dim=proj_dim,
-                    feature_size=actual_feature_size
-                ).cuda()
-
-                # Strict paper mode uses the shared projector_str for both
-                # structure and style branches.
-                self.projector_sty = None
-
-                proj_params = sum(p.numel() for p in self.projector_str.parameters())
-                print("Shared CGSD projector initialized:")
-                print(f"  - Input channels: {cgsd_channels} (Layer {cgsd_layer})")
-                print(f"  - Projection dim: {proj_dim}")
-                print(f"  - Hidden channels: {proj_hidden}")
-                print(f"  - Number of parameters: {proj_params}")
-            else:
-                self.projector_str = None
-                self.projector_sty = None
+        total_params = sum(p.numel() for p in self.netseg.parameters())
+        print(f"Backbone: {self.backbone}")
+        print(f"Number of parameters (segmentation): {total_params}")
+        print(f"Deep feature channels: {self.feature_channels}")
+        if getattr(opt, 'use_cgsd', 0) and not use_channel_gate:
+            print(
+                f"CGSD channel-gate branch is only implemented for backbone=unet; "
+                f"backbone={self.backbone} will use the shared logits/feature path."
+            )
+        elif use_channel_gate:
+            channel_sizes = {1: 16, 2: 32, 3: 64}
+            gate_type = "softmax (CCSDG-style)" if getattr(opt, 'use_temperature', 0) == 1 else "sigmoid"
+            print(f"CGSD enabled at encoder layer {cgsd_layer} ({channel_sizes[cgsd_layer]} channels)")
+            print(f"  - Gate type: {gate_type}")
+            if getattr(opt, 'use_temperature', 0) == 1:
+                print(f"  - Temperature: {getattr(opt, 'gate_tau', 0.1)}")
         else:
-            print("no this model")
+            print("CGSD disabled: model follows the old no-CGSD branch")
+
+        # Initialize the shared projector for CGSD (if enabled).
+        if use_channel_gate and getattr(opt, 'use_projector', 1) == 1:
+            channel_sizes = {1: 16, 2: 32, 3: 64}
+            cgsd_channels = channel_sizes[cgsd_layer]
+            proj_dim = getattr(opt, 'proj_dim', 1024)
+            proj_hidden = getattr(opt, 'proj_hidden_channels', 8)
+
+            with torch.no_grad():
+                dummy_input = torch.randn(1, 3, 192, 192).cuda()
+                x1 = self.netseg.convd1(dummy_input)
+                if cgsd_layer >= 2:
+                    x2 = self.netseg.convd2(x1)
+                    if cgsd_layer >= 3:
+                        feature_map = self.netseg.convd3(x2)
+                    else:
+                        feature_map = x2
+                else:
+                    feature_map = x1
+                actual_feature_size = feature_map.shape[2]
+                print(f"Auto-detected feature map size at Layer {cgsd_layer}: {actual_feature_size}x{actual_feature_size}")
+
+            from .unet import Projector
+            self.projector_str = Projector(
+                in_channels=cgsd_channels,
+                hidden_channels=proj_hidden,
+                proj_dim=proj_dim,
+                feature_size=actual_feature_size
+            ).cuda()
+            self.projector_sty = None
+
+            proj_params = sum(p.numel() for p in self.projector_str.parameters())
+            print("Shared CGSD projector initialized:")
+            print(f"  - Input channels: {cgsd_channels} (Layer {cgsd_layer})")
+            print(f"  - Projection dim: {proj_dim}")
+            print(f"  - Hidden channels: {proj_hidden}")
+            print(f"  - Number of parameters: {proj_params}")
+        else:
+            self.projector_str = None
+            self.projector_sty = None
         
         if istest == 1:
             print("reloaddir:",reloaddir)
@@ -247,7 +270,7 @@ class Train_process():
            
                 
     
-        x=256
+        x = self.feature_channels
         projfunc= nn.Sequential(
                 nn.Conv2d(x, x, kernel_size=1, stride=1, padding=1, bias=False),
                 nn.BatchNorm2d(x),
@@ -313,7 +336,7 @@ class Train_process():
             # Auto-detect encoder feature dimension from U-Net
             # IMPORTANT: encf is x5 (from convd5), not x4!
             # See unet.py:235 -> return y1_pred, x5
-            encoder_dim = self.netseg.convd5.conv2.out_channels  # x5 feature dim (16*n = 256)
+            encoder_dim = self.feature_channels
             cls_output_dim = getattr(opt, 'rccs_embed_dim', 128)
 
             self.cls_net = RCCSFeatureEncoder(
@@ -503,6 +526,9 @@ class Train_process():
                 self.configure_a3_tta()
             elif self.tta_mode == 'grata':
                 self.configure_grata()
+
+    def cgsd_active(self):
+        return bool(getattr(self.opt, 'use_cgsd', 0)) and bool(getattr(self.netseg, 'supports_cgsd', False))
 
     def configure_alpha_norm(self, alpha):
         replaced = replace_bn_with_alpha_bn(self.netseg, alpha)
@@ -2153,7 +2179,7 @@ class Train_process():
             if return_feat=True: (pred, encf, loss_dice, loss_ce, f1_str, f1_sty)
         """
         # Request structure/style features only when CGSD is enabled.
-        gate_on = bool(self.opt.use_cgsd)
+        gate_on = self.cgsd_active()
         if return_feat and gate_on:
             pred, encf, f1_str, f1_sty = self.netseg(input_img, return_feat=True)
         else:
@@ -2575,7 +2601,7 @@ class Train_process():
         w_ce = self.opt.w_ce
         w_dice = self.opt.w_dice
         use_saam = bool(getattr(self.opt, 'use_saam', 0))
-        gate_on = bool(self.opt.use_cgsd)
+        gate_on = self.cgsd_active()
         return_feat = gate_on
         sgf_view2_only = bool(getattr(self.opt, 'sgf_view2_only', 0)) and bool(getattr(self.opt, 'use_sgf', 0))
 

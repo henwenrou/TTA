@@ -395,6 +395,9 @@ def get_args():
     parser.add_argument('--f_seed', type=int, default=1, help='seed')
     parser.add_argument('--lr', type=float, default=0.0005, help='lr')
     parser.add_argument('--model', type=str, default='unet', help='model')
+    parser.add_argument('--backbone', type=str, default='unet',
+                        choices=['unet', 'nnunet', 'swinunet'],
+                        help='Segmentation backbone: original DCON U-Net, nnU-Net-style U-Net, or Swin-UNet.')
     parser.add_argument('--batchSize', type=int, default=32, help='bs')
     parser.add_argument('--all_epoch', type=int, default=50, help='epochs')
     parser.add_argument('--profile_cost', type=int, default=0,
@@ -1428,6 +1431,7 @@ if __name__ == '__main__':
                 root_logger.removeHandler(handler)
     logging.info("config:"+str(opt))
     logging.info("name:"+opt.expname)
+    logging.info("backbone:"+str(opt.backbone))
     logging.info("use_cgsd:"+str(opt.use_cgsd))
     logging.info("local_aug_type:"+str(opt.local_aug_type))
     logging.info("view_pipeline:"+(
@@ -2264,7 +2268,8 @@ if __name__ == '__main__':
 
                 # Update progress bar with paper-mainline losses only.
                 total_loss = model.loss_all.item()
-                if opt.use_cgsd and getattr(model, 'optimizer_cgsd', None) is not None:
+                cgsd_active = model.cgsd_active() if hasattr(model, 'cgsd_active') else bool(opt.use_cgsd)
+                if cgsd_active and getattr(model, 'optimizer_cgsd', None) is not None:
                     total_loss += model.loss_cgsd.item()
 
                 postfix_dict = {
@@ -2283,7 +2288,7 @@ if __name__ == '__main__':
                             postfix_dict['topk%'] = f'{model.saam_stats["topk_selected_ratio"]*100:.1f}'
                         if 'alignment_weight_mean' in model.saam_stats:
                             postfix_dict['w_mean'] = f'{model.saam_stats["alignment_weight_mean"]:.3f}'
-                if opt.use_cgsd:
+                if cgsd_active:
                     postfix_dict['str'] = f'{model.loss_str.item():.4f}'
                 if getattr(model, 'mechanism_stats', None):
                     if 'mechanism_mean_dstab_core' in model.mechanism_stats:
@@ -2313,7 +2318,7 @@ if __name__ == '__main__':
                 log_str += "segW:{:.5f} segV2:{:.5f} ".format(model.loss_seg1.item(), model.loss_seg2.item())
                 if hasattr(model, 'loss_seg0'):
                     log_str += "seg0:{:.5f} ".format(model.loss_seg0.item())
-                if opt.use_cgsd:
+                if cgsd_active:
                     log_str += "str:{:.5f} sty:{:.5f} cgsd:{:.5f} ".format(
                         model.loss_str.item(), model.loss_sty.item(), model.loss_cgsd.item())
                 if hasattr(opt, 'use_saam') and opt.use_saam:
@@ -2467,7 +2472,8 @@ if __name__ == '__main__':
             model.optimizer_cgsd.param_groups[0]['lr'] = cgsd_base_lr * (1 - epoch / opt.all_epoch)
 
         # Monitor ChannelGate distribution when CGSD is enabled.
-        if epoch % 10 == 0 and opt.use_cgsd:
+        cgsd_active = model.cgsd_active() if hasattr(model, 'cgsd_active') else bool(opt.use_cgsd)
+        if epoch % 10 == 0 and cgsd_active:
             if hasattr(model.netseg, 'chan_gate'):
                 # Compute gate statistics correctly for both sigmoid and softmax modes.
                 logits = model.netseg.chan_gate.logits.detach().cpu()

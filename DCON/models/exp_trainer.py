@@ -16,6 +16,7 @@ from .unet import *
 from .sgf import get_sgf_map
 from .saam import (
     StabilityAwareAlignmentModule,
+    compute_fsda_disagreement_reliability,
     compute_prediction_reliability_from_views,
     compute_saam_loss,
 )
@@ -270,7 +271,7 @@ class Train_process():
             print(
                 f"SAAM initialized: tau={opt.saam_tau}, topk={opt.saam_topk}, "
                 f"mode={opt.saam_stability_mode}, "
-                f"weight_type={getattr(opt, 'saam_weight_type', 'stability')}, "
+                f"weight_type={getattr(opt, 'align_weight_type', None) or getattr(opt, 'saam_weight_type', 'stability')}, "
                 f"mask_ablation={getattr(opt, 'saam_mask_ablation', 'w_times_m')}, "
                 f"uncertainty_tau={getattr(opt, 'uncertainty_tau', 0.5)}, "
                 f"uncertainty_view_mode={getattr(opt, 'uncertainty_view_mode', 'anchor_only')}"
@@ -2360,11 +2361,14 @@ class Train_process():
             self.loss_saam = torch.zeros(1).cuda()
             self.loss_saam_01 = torch.zeros(1).cuda()
             self.loss_saam_02 = torch.zeros(1).cuda()
+            align_weight_type = getattr(self.opt, 'align_weight_type', None)
             self.saam_stats = {
                 'lambda_01': 0.0,
                 'lambda_02': 0.0,
                 'status': 'warmup',
-                'saam_weight_type': str(getattr(self.opt, 'saam_weight_type', 'stability')).lower(),
+                'saam_weight_type': str(
+                    align_weight_type or getattr(self.opt, 'saam_weight_type', 'stability')
+                ).lower(),
                 'saam_mask_ablation': str(getattr(self.opt, 'saam_mask_ablation', 'w_times_m')).lower(),
                 'uncertainty_view_mode': str(getattr(self.opt, 'uncertainty_view_mode', 'anchor_only')).lower(),
                 'W_mean': 0.0,
@@ -2408,10 +2412,18 @@ class Train_process():
         # Coverage ratio of foreground pixels (for logging/debug)
         mask_coverage = (mask.sum() / mask.numel()).item()
 
-        saam_weight_type = str(getattr(self.opt, 'saam_weight_type', 'stability')).lower()
+        align_weight_type = getattr(self.opt, 'align_weight_type', None)
+        saam_weight_type = str(align_weight_type or getattr(self.opt, 'saam_weight_type', 'stability')).lower()
         saam_mask_ablation = str(getattr(self.opt, 'saam_mask_ablation', 'w_times_m')).lower()
         uncertainty_view_mode = str(getattr(self.opt, 'uncertainty_view_mode', 'anchor_only')).lower()
-        allowed_weight_types = ['stability', 'entropy', 'confidence', 'uniform', 'foreground_only']
+        allowed_weight_types = [
+            'stability',
+            'entropy',
+            'confidence',
+            'uniform',
+            'foreground_only',
+            'fsda_uncertainty',
+        ]
         if saam_weight_type not in allowed_weight_types:
             raise ValueError(f"saam_weight_type must be one of {allowed_weight_types}, got {saam_weight_type}")
         allowed_mask_ablations = ['uniform_align', 'm_only', 'w_only', 'w_times_m']
@@ -2481,6 +2493,20 @@ class Train_process():
             elif saam_weight_type == 'foreground_only':
                 mask_loss = mask_low
                 W_loss = torch.ones_like(mask_low)
+            elif saam_weight_type == 'fsda_uncertainty':
+                with torch.no_grad():
+                    W_high = compute_fsda_disagreement_reliability(
+                        pred_0.detach(),
+                        pred_1.detach(),
+                        pred_2.detach(),
+                    )
+                    W_loss = F.interpolate(
+                        W_high,
+                        size=feature_size,
+                        mode="bilinear",
+                        align_corners=False,
+                    ).squeeze(1).to(dtype=q_0.dtype)
+                mask_loss = mask_low.to(dtype=q_0.dtype)
             else:
                 with torch.no_grad():
                     W_high = compute_prediction_reliability_from_views(

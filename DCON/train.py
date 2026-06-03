@@ -887,8 +887,25 @@ def get_args():
                         choices=['mean', 'max'],
                         help='Stability aggregation mode used by SAAM: mean or max (default: mean)')
     parser.add_argument('--saam_weight_type', type=str, default='stability',
-                        choices=['stability', 'entropy', 'confidence', 'uniform', 'foreground_only'],
+                        choices=[
+                            'stability',
+                            'entropy',
+                            'confidence',
+                            'uniform',
+                            'foreground_only',
+                            'fsda_uncertainty',
+                        ],
                         help='SAAM alignment weight source. stability keeps the original feature-stability gate.')
+    parser.add_argument('--align_weight_type', type=str, default=None,
+                        choices=[
+                            'stability',
+                            'entropy',
+                            'confidence',
+                            'uniform',
+                            'foreground_only',
+                            'fsda_uncertainty',
+                        ],
+                        help='Alias/override for the SAAM alignment weight source.')
     parser.add_argument('--saam_mask_ablation', type=str, default='w_times_m',
                         choices=['uniform_align', 'm_only', 'w_only', 'w_times_m'],
                         help='SAAM foreground-prior ablation for final alignment weight A: '
@@ -947,6 +964,11 @@ def get_args():
                         help='Embedding dimension used by RCCS semantic matching (default: 128)')
 
     args = parser.parse_args()
+
+    if args.align_weight_type is not None:
+        args.saam_weight_type = args.align_weight_type
+    else:
+        args.align_weight_type = args.saam_weight_type
 
     if args.phase == 'test' and args.tta == 'sm_ppm':
         mode_tag = f"smppm_{args.smppm_ablation_mode}"
@@ -1428,6 +1450,7 @@ if __name__ == '__main__':
         logging.info("saam_topk: "+str(opt.saam_topk))
         logging.info("saam_stability_mode: "+str(opt.saam_stability_mode))
         logging.info("saam_weight_type: "+str(opt.saam_weight_type))
+        logging.info("align_weight_type: "+str(opt.align_weight_type))
         logging.info("saam_mask_ablation: "+str(opt.saam_mask_ablation))
         logging.info("uncertainty_tau: "+str(opt.uncertainty_tau))
         logging.info("uncertainty_view_mode: "+str(opt.uncertainty_view_mode))

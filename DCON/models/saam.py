@@ -284,6 +284,55 @@ def compute_prediction_reliability_from_views(
     return torch.stack(weights, dim=0).mean(dim=0)
 
 
+def compute_fsda_disagreement_reliability(
+    anchor_logits,
+    base_logits,
+    strong_logits,
+    eps=1e-6,
+):
+    """
+    FSDA-DG-style multi-prediction disagreement reliability.
+
+    This implements only the disagreement-based weighting baseline: three view
+    predictions are compared against their mean prediction, converted from
+    uncertainty to reliability, and normalized per sample to [0, 1].
+
+    Args:
+        anchor_logits, base_logits, strong_logits: logits [B, C, H, W]
+        eps: numerical stability constant
+
+    Returns:
+        weight: class-agnostic reliability map [B, 1, H, W]
+    """
+    for name, logits in [
+        ('anchor_logits', anchor_logits),
+        ('base_logits', base_logits),
+        ('strong_logits', strong_logits),
+    ]:
+        if logits.dim() != 4:
+            raise ValueError(f"Expected {name} [B,C,H,W], got {tuple(logits.shape)}")
+
+    p_anchor = F.softmax(anchor_logits, dim=1)
+    p_base = F.softmax(base_logits, dim=1)
+    p_strong = F.softmax(strong_logits, dim=1)
+    p_avg = (p_anchor + p_base + p_strong) / 3.0
+
+    log_p_avg = torch.log(p_avg + eps)
+    u_anchor = p_anchor * (torch.log(p_anchor + eps) - log_p_avg)
+    u_base = p_base * (torch.log(p_base + eps) - log_p_avg)
+    u_strong = p_strong * (torch.log(p_strong + eps) - log_p_avg)
+    uncertainty = (
+        u_anchor.sum(dim=1, keepdim=True)
+        + u_base.sum(dim=1, keepdim=True)
+        + u_strong.sum(dim=1, keepdim=True)
+    ) / 3.0
+
+    weight = torch.exp(-uncertainty)
+    weight_min = weight.amin(dim=(2, 3), keepdim=True)
+    weight_max = weight.amax(dim=(2, 3), keepdim=True)
+    return (weight - weight_min) / (weight_max - weight_min + eps)
+
+
 def compute_saam_loss(q_0, q_1, q_2, mask, W, lambda_01=1.0, lambda_02=1.0):
     """
     Compute the SAAM alignment loss `L_01 + L_02`.

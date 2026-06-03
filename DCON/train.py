@@ -1399,8 +1399,19 @@ if __name__ == '__main__':
         if os.path.exists(exp_dir):
             shutil.rmtree(exp_dir)
         code_dir = os.path.join(exp_dir, 'code')
-        # Ignore patterns to prevent recursive copying and save space
-        ignore_patterns = shutil.ignore_patterns('.git', '__pycache__', 'ckpts', 'data', '*.pyc', '.idea', '.ipynb_checkpoints')
+        # Ignore generated outputs to prevent recursive copying into exp_dir/code.
+        ignore_patterns = shutil.ignore_patterns(
+            '.git',
+            '__pycache__',
+            'ckpts',
+            'results*',
+            'results_*',
+            'code',
+            'data',
+            '*.pyc',
+            '.idea',
+            '.ipynb_checkpoints',
+        )
         shutil.copytree('.', code_dir, ignore=ignore_patterns)
     
     if not os.path.exists(ckpt_dir):

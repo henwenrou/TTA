@@ -4,6 +4,7 @@
 # Examples:
 #   bash scripts/run_backbone_ablation.sh
 #   BACKBONES="nnunet swinunet" EPOCHS_OVERRIDE=20 DRY_RUN=1 bash scripts/run_backbone_ablation.sh
+#   BACKBONES="nnunet swinunet" ONLY_TASKS="bl lb" CARDIAC_BL_EPOCHS=500 CARDIAC_LB_EPOCHS=900 bash scripts/run_backbone_ablation.sh
 #   PYTHON_BIN=/path/to/python SAA_DATA_ROOT=/path/to/data bash scripts/run_backbone_ablation.sh
 
 set -euo pipefail
@@ -33,6 +34,7 @@ fi
 
 RESULTS_ROOT="${RESULTS_ROOT:-results_backbone_ablation}"
 BACKBONES="${BACKBONES:-unet nnunet swinunet}"
+ONLY_TASKS="${ONLY_TASKS:-all}"
 GPU_IDS="${GPU_IDS:-0}"
 NUM_WORKERS="${NUM_WORKERS:-8}"
 BATCH_SIZE="${BATCH_SIZE:-20}"
@@ -55,6 +57,20 @@ if [ ! -d "${SAA_DATA_ROOT}" ]; then
   echo "SAA_DATA_ROOT does not exist: ${SAA_DATA_ROOT}" >&2
   exit 1
 fi
+
+should_run_task() {
+  local task="$1"
+  if [ "${ONLY_TASKS}" = "all" ]; then
+    return 0
+  fi
+  local item
+  for item in ${ONLY_TASKS}; do
+    if [ "${item}" = "${task}" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
 
 run_one() {
   local backbone="$1"
@@ -153,15 +169,27 @@ echo "Python: ${PYTHON_BIN}"
 echo "SAA_DATA_ROOT: ${SAA_DATA_ROOT}"
 echo "Results root: ${PROJECT_DIR}/${RESULTS_ROOT}"
 echo "Backbones: ${BACKBONES}"
+echo "Tasks: ${ONLY_TASKS}"
 echo
 
 for backbone in ${BACKBONES}; do
   ab_epochs="${EPOCHS_OVERRIDE:-1500}"
-  card_epochs="${EPOCHS_OVERRIDE:-1800}"
-  run_one "${backbone}" "ABDOMINAL" 5 "SABSCT" "CHAOST2" "${ab_epochs}" 3 2000
-  run_one "${backbone}" "ABDOMINAL" 5 "CHAOST2" "SABSCT" "${ab_epochs}" 3 2000
-  run_one "${backbone}" "CARDIAC" 4 "bSSFP" "LGE" "${card_epochs}" 18 5000
-  run_one "${backbone}" "CARDIAC" 4 "LGE" "bSSFP" "${card_epochs}" 18 5000
+  cardiac_default_epochs="${EPOCHS_OVERRIDE:-1800}"
+  card_bl_epochs="${CARDIAC_BL_EPOCHS:-${cardiac_default_epochs}}"
+  card_lb_epochs="${CARDIAC_LB_EPOCHS:-${cardiac_default_epochs}}"
+
+  if should_run_task "sc"; then
+    run_one "${backbone}" "ABDOMINAL" 5 "SABSCT" "CHAOST2" "${ab_epochs}" 3 2000
+  fi
+  if should_run_task "cs"; then
+    run_one "${backbone}" "ABDOMINAL" 5 "CHAOST2" "SABSCT" "${ab_epochs}" 3 2000
+  fi
+  if should_run_task "bl"; then
+    run_one "${backbone}" "CARDIAC" 4 "bSSFP" "LGE" "${card_bl_epochs}" 18 5000
+  fi
+  if should_run_task "lb"; then
+    run_one "${backbone}" "CARDIAC" 4 "LGE" "bSSFP" "${card_lb_epochs}" 18 5000
+  fi
 done
 
 echo "Backbone ablation runs completed."

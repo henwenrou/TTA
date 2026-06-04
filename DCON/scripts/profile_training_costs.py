@@ -14,6 +14,7 @@ from datetime import datetime
 import re
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -40,6 +41,8 @@ def parse_args() -> argparse.Namespace:
                         help="Reuse an existing cost_profile.csv when present.")
     parser.add_argument("--gpu-poll-interval", type=float, default=0.5,
                         help="Seconds between nvidia-smi GPU-memory samples.")
+    parser.add_argument("--stream-log", action="store_true",
+                        help="Stream each training subprocess log to the terminal while also saving it.")
     parser.add_argument("--dry-run", action="store_true", help="Print commands without running them.")
     return parser.parse_args()
 
@@ -83,6 +86,7 @@ def run_command(
     dry_run: bool,
     gpu_id: str,
     poll_interval: float,
+    stream_log: bool,
 ) -> float | None:
     printable = " ".join(cmd)
     print(f"\n[run] cwd={cwd}")
@@ -90,26 +94,55 @@ def run_command(
     if dry_run:
         return None
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("w") as log_file:
-        proc = subprocess.Popen(
-            cmd,
-            cwd=str(cwd),
-            stdout=log_file,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
-        peak_mem_gb = query_gpu_memory_gb(gpu_id)
-        while proc.poll() is None:
+
+    stop_event = threading.Event()
+    peak_holder: dict[str, float | None] = {"peak": query_gpu_memory_gb(gpu_id)}
+
+    def monitor_gpu() -> None:
+        while not stop_event.is_set():
             current_mem_gb = query_gpu_memory_gb(gpu_id)
             if current_mem_gb is not None:
-                peak_mem_gb = current_mem_gb if peak_mem_gb is None else max(peak_mem_gb, current_mem_gb)
+                peak = peak_holder["peak"]
+                peak_holder["peak"] = current_mem_gb if peak is None else max(peak, current_mem_gb)
             time.sleep(max(poll_interval, 0.1))
-        current_mem_gb = query_gpu_memory_gb(gpu_id)
-        if current_mem_gb is not None:
-            peak_mem_gb = current_mem_gb if peak_mem_gb is None else max(peak_mem_gb, current_mem_gb)
+
+    monitor_thread = threading.Thread(target=monitor_gpu, daemon=True)
+    monitor_thread.start()
+
+    with log_path.open("w") as log_file:
+        if stream_log:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(cwd),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1,
+            )
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                print(line, end="")
+                log_file.write(line)
+            proc.wait()
+        else:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(cwd),
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            proc.wait()
+
+    stop_event.set()
+    monitor_thread.join(timeout=2.0)
+    current_mem_gb = query_gpu_memory_gb(gpu_id)
+    if current_mem_gb is not None:
+        peak = peak_holder["peak"]
+        peak_holder["peak"] = current_mem_gb if peak is None else max(peak, current_mem_gb)
     if proc.returncode != 0:
         raise RuntimeError(f"Command failed with exit code {proc.returncode}. See log: {log_path}")
-    return peak_mem_gb
+    return peak_holder["peak"]
 
 
 def profile_csv_path(root: Path, source: str, expname: str) -> Path:
@@ -367,6 +400,7 @@ def main() -> None:
                 args.dry_run,
                 args.gpu,
                 args.gpu_poll_interval,
+                args.stream_log,
             )
             if method == "DCON" and not args.dry_run:
                 write_dcon_profile_from_log(log_path, profile_path, monitor_peaks[method])

@@ -30,6 +30,7 @@ cmd=(
   --warmup-epochs "${WARMUP_EPOCHS}"
   --batch-size "${BATCH_SIZE}"
   --num-workers "${NUM_WORKERS}"
+  --stream-log
 )
 
 if [[ -n "${RUN_NAME}" ]]; then

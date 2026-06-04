@@ -70,23 +70,24 @@ def query_gpu_memory_gb(gpu_id: str) -> float | None:
         return None
 
 
-def ensure_small_dcon_data_links(data_root: Path) -> None:
+def ensure_small_dcon_data_links(data_root: Path, small_dcon_root: Path) -> None:
     abdominal_root = data_root / "abdominal"
     for domain in ["CHAOST2", "SABSCT"]:
         src = abdominal_root / domain
-        dst = Path("/") / domain
         if not src.is_dir():
             raise FileNotFoundError(f"Missing data directory: {src}")
-        if dst.exists():
-            continue
-        try:
-            dst.symlink_to(src, target_is_directory=True)
-            print(f"Created symlink: {dst} -> {src}")
-        except PermissionError as exc:
-            raise PermissionError(
-                f"Cannot create {dst}. Original DCON expects /{domain}/processed. "
-                f"Run as root or create the symlink manually."
-            ) from exc
+        for dst in [Path("/") / domain, small_dcon_root / domain]:
+            if dst.exists():
+                continue
+            try:
+                dst.symlink_to(src, target_is_directory=True)
+                print(f"Created symlink: {dst} -> {src}")
+            except PermissionError as exc:
+                raise PermissionError(
+                    f"Cannot create {dst}. Original DCON expects both /{domain}/processed "
+                    f"and {small_dcon_root / domain}/processed to resolve. "
+                    f"Run as root or create the symlink manually."
+                ) from exc
 
 
 def build_command(args: argparse.Namespace, expname: str) -> list[str]:
@@ -243,7 +244,7 @@ def main() -> None:
     data_root = Path(args.data_root).resolve() if args.data_root else project_root / "data"
 
     if not args.no_root_symlinks:
-        ensure_small_dcon_data_links(data_root)
+        ensure_small_dcon_data_links(data_root, small_dcon_root)
 
     log_path = out_dir / "dcon.log"
     cmd = build_command(args, run_name)

@@ -2603,7 +2603,10 @@ class Train_process():
         use_saam = bool(getattr(self.opt, 'use_saam', 0))
         gate_on = self.cgsd_active()
         return_feat = gate_on
-        sgf_view2_only = bool(getattr(self.opt, 'sgf_view2_only', 0)) and bool(getattr(self.opt, 'use_sgf', 0))
+        use_sgf_requested = bool(getattr(self.opt, 'use_sgf', 0))
+        sgf_interval = max(1, int(getattr(self.opt, 'sgf_interval', 1)))
+        use_sgf_this_iter = use_sgf_requested and (iteration is None or iteration % sgf_interval == 0)
+        sgf_view2_only = bool(getattr(self.opt, 'sgf_view2_only', 0)) and use_sgf_this_iter
 
         self.input_mask = train_batch['label'].float().cuda()
         self.input_anchor = None
@@ -2676,7 +2679,7 @@ class Train_process():
                 ('loss', self.loss_all),
             ])
 
-        if hasattr(self.opt, 'use_sgf') and self.opt.use_sgf:
+        if use_sgf_this_iter:
             self.input_strong_seed = train_batch['strong_view'].float().cuda()
             self.input_base_for_loss = None if sgf_view2_only else self.input_base
 

@@ -836,6 +836,8 @@ def get_args():
                         help='Use saliency-guided fusion (SGF) for strong-view construction')
     parser.add_argument('--sgf_grid_size', type=int, default=8,
                         help='Grid size for the SGF saliency map')
+    parser.add_argument('--sgf_interval', type=int, default=1,
+                        help='Use SGF every N training iterations; 1 means every iteration.')
     parser.add_argument('--sgf_view2_only', type=int, default=0,
                         help='SGF view2-only: skip base-view generation and base-view-dependent losses')
 

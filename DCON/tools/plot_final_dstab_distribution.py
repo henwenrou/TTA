@@ -73,6 +73,16 @@ def parse_args():
                         help="0 means analyze the whole selected split.")
     parser.add_argument("--max_plot_values", type=int, default=200000,
                         help="Per-variant random subsample size for violin plotting; summary uses all values.")
+    parser.add_argument("--boxplot_clip_percentile", type=float, default=99.0,
+                        help="x-axis upper limit percentile computed from combined d_stab values.")
+    parser.add_argument("--flier_size", type=float, default=0.5)
+    parser.add_argument("--flier_alpha", type=float, default=0.15)
+    parser.add_argument("--hide_fliers", action="store_true",
+                        help="Hide boxplot outliers; max remains in dstab_summary.csv.")
+    parser.add_argument("--unstable_ylim", type=float, default=0.4,
+                        help="Y-axis upper limit for unstable_ratio_bar. Use <=0 for auto.")
+    parser.add_argument("--save_values", action="store_true", default=True,
+                        help="Save full d_stab arrays for no-model redraws.")
     parser.add_argument("--dstab_tau", type=float, default=None,
                         help="Fixed tau for unstable ratio.")
     parser.add_argument("--dstab_tau_percentile", type=float, default=75.0,
@@ -225,7 +235,7 @@ def write_summary(path, results, tau):
     return rows
 
 
-def plot_distribution(path_png, path_pdf, plot_values, summary_rows, tau, x_upper):
+def plot_distribution(path_png, path_pdf, plot_values, summary_rows, tau, x_upper, args):
     labels = [item["variant"] for item in plot_values]
     values = [item["values"] for item in plot_values]
     fig, ax = plt.subplots(figsize=(7.4, 4.2), constrained_layout=True)
@@ -236,7 +246,7 @@ def plot_distribution(path_png, path_pdf, plot_values, summary_rows, tau, x_uppe
         vert=False,
         labels=labels,
         widths=0.62,
-        showfliers=True,
+        showfliers=not args.hide_fliers,
         patch_artist=True,
         medianprops={"color": "black", "linewidth": 1.8},
         boxprops={"edgecolor": "#4d4d4d", "linewidth": 1.8},
@@ -246,8 +256,8 @@ def plot_distribution(path_png, path_pdf, plot_values, summary_rows, tau, x_uppe
             "marker": "o",
             "markerfacecolor": "#4d4d4d",
             "markeredgecolor": "none",
-            "markersize": 2.0,
-            "alpha": 0.22,
+            "markersize": args.flier_size,
+            "alpha": args.flier_alpha,
         },
     )
     for patch, color in zip(box["boxes"], colors):
@@ -259,6 +269,16 @@ def plot_distribution(path_png, path_pdf, plot_values, summary_rows, tau, x_uppe
     ax.set_xlabel("d_stab")
     ax.set_ylabel("Variant")
     ax.set_title("SAAM d_stab Distribution at Final Checkpoint")
+    ax.text(
+        0.01,
+        0.02,
+        f"x-axis clipped at P{args.boxplot_clip_percentile:g} for visualization",
+        transform=ax.transAxes,
+        ha="left",
+        va="bottom",
+        fontsize=8.5,
+        color="#555555",
+    )
     ax.grid(axis="x", alpha=0.25)
     ax.legend(loc="lower right", frameon=True)
 
@@ -279,17 +299,21 @@ def plot_distribution(path_png, path_pdf, plot_values, summary_rows, tau, x_uppe
     plt.close(fig)
 
 
-def plot_unstable_bar(path_png, path_pdf, summary_rows):
+def plot_unstable_bar(path_png, path_pdf, summary_rows, unstable_ylim):
     labels = [row["variant"] for row in summary_rows]
     values = [float(row["unstable_ratio"]) for row in summary_rows]
     fig, ax = plt.subplots(figsize=(6.2, 4.2), constrained_layout=True)
     bars = ax.bar(labels, values, color=["#8da0cb", "#fc8d62"], edgecolor="#222222")
-    ax.set_ylim(0.0, max(1.0, max(values) * 1.15))
+    if unstable_ylim and unstable_ylim > 0:
+        ax.set_ylim(0.0, unstable_ylim)
+    else:
+        ax.set_ylim(0.0, max(values) * 1.15 if values else 1.0)
     ax.set_ylabel("unstable ratio")
     ax.set_title("Unstable Ratio at Final Checkpoint")
     ax.grid(axis="y", alpha=0.25)
     for bar, value in zip(bars, values):
-        ax.text(bar.get_x() + bar.get_width() / 2, value + 0.015, f"{value:.3f}", ha="center")
+        offset = (ax.get_ylim()[1] - ax.get_ylim()[0]) * 0.025
+        ax.text(bar.get_x() + bar.get_width() / 2, value + offset, f"{value:.3f}", ha="center")
     fig.savefig(path_png, dpi=200)
     fig.savefig(path_pdf)
     plt.close(fig)
@@ -305,6 +329,8 @@ def main():
         raise ValueError("--dstab_tau must be finite.")
     if args.dstab_tau is None and not (0.0 < args.dstab_tau_percentile < 100.0):
         raise ValueError("--dstab_tau_percentile must be in (0, 100).")
+    if not (0.0 < args.boxplot_clip_percentile <= 100.0):
+        raise ValueError("--boxplot_clip_percentile must be in (0, 100].")
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
     set_seed(args.seed)
@@ -333,7 +359,7 @@ def main():
         for name, use_cgsd in VARIANTS
     ]
     combined = torch.cat([result["values"] for result in results])
-    x_upper = float(torch.quantile(combined, 0.99).item())
+    x_upper = float(torch.quantile(combined, args.boxplot_clip_percentile / 100.0).item())
     if not math.isfinite(x_upper) or x_upper <= 0:
         x_upper = float(combined.max().item())
     if args.dstab_tau is not None:
@@ -345,6 +371,11 @@ def main():
 
     summary_csv = out_dir / "dstab_summary.csv"
     summary_rows = write_summary(summary_csv, results, tau)
+    if args.save_values:
+        np.savez_compressed(
+            out_dir / "dstab_values.npz",
+            **{result["variant"]: result["values"].numpy() for result in results},
+        )
 
     plot_values = [
         {
@@ -360,11 +391,13 @@ def main():
         summary_rows,
         tau,
         x_upper,
+        args,
     )
     plot_unstable_bar(
         out_dir / "unstable_ratio_bar.png",
         out_dir / "unstable_ratio_bar.pdf",
         summary_rows,
+        args.unstable_ylim,
     )
 
     log_text = "\n".join([

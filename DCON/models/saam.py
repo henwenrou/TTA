@@ -135,7 +135,7 @@ class StabilityAwareAlignmentModule(nn.Module):
 
         return W, R
 
-    def forward(self, f_0, f_1, f_2, mask_size, return_debug=False):
+    def forward(self, f_0, f_1, f_2, mask_size, return_debug=False, return_stats=False):
         """
         Compute stability and return the upsampled SAAM weights.
 
@@ -146,7 +146,7 @@ class StabilityAwareAlignmentModule(nn.Module):
         Returns:
             W_up: upsampled SAAM weights [B, H, W]
             stats: statistics dictionary for logging
-            debug: optional tensor dictionary when return_debug=True
+            debug: optional tensor dictionary when return_debug=True or return_stats=True
         """
         # 1. Compute stability
         d_stab, d_01, d_02, d_12 = self.compute_stability(f_0, f_1, f_2)
@@ -196,7 +196,9 @@ class StabilityAwareAlignmentModule(nn.Module):
                 'topk_selected_ratio': topk_mask.mean().item(),  # Should be close to topk_ratio.
             }
 
-        if return_debug:
+        if return_debug or return_stats:
+            # Analysis-only tensor exposure. Default training/evaluation return
+            # values are unchanged because return_debug/return_stats default off.
             debug = {
                 'd_stab': d_stab,
                 'd_01': d_01,

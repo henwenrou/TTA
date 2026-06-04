@@ -158,6 +158,57 @@ def build_segmentation_backbone(opt, num_classes):
     raise ValueError(f"Unsupported --backbone {backbone}. Expected one of: unet, nnunet, swinunet.")
 
 
+def unwrap_checkpoint_state_dict(checkpoint):
+    if isinstance(checkpoint, dict):
+        for key in ("state_dict", "model_state_dict", "model", "netseg"):
+            value = checkpoint.get(key)
+            if isinstance(value, dict):
+                return value
+    return checkpoint
+
+
+def _normalize_checkpoint_key(key):
+    if key.startswith("module."):
+        key = key[len("module."):]
+    if key.startswith("netseg."):
+        key = key[len("netseg."):]
+    return key
+
+
+def infer_backbone_from_state_dict(state_dict):
+    if not isinstance(state_dict, dict):
+        return None
+
+    keys = {_normalize_checkpoint_key(str(key)) for key in state_dict.keys()}
+    if any(key.startswith(("high_res_stem.", "patch_embed.", "stage1.", "stage2.", "stage3.", "stage4.")) for key in keys):
+        return "swinunet"
+    if any(key.startswith("enc1.") for key in keys) and any(key.startswith("enc5.") for key in keys):
+        return "nnunet"
+    if any(key.startswith("convd1.") for key in keys):
+        return "unet"
+    return None
+
+
+def _is_allowed_load_mismatch(key):
+    key = _normalize_checkpoint_key(str(key))
+    return key.startswith("chan_gate.")
+
+
+def validate_checkpoint_load(missing_keys, unexpected_keys, checkpoint_path):
+    critical_missing = [key for key in missing_keys if not _is_allowed_load_mismatch(key)]
+    critical_unexpected = [key for key in unexpected_keys if not _is_allowed_load_mismatch(key)]
+    if critical_missing or critical_unexpected:
+        preview_missing = critical_missing[:10]
+        preview_unexpected = critical_unexpected[:10]
+        raise RuntimeError(
+            "Checkpoint/model architecture mismatch while loading "
+            f"{checkpoint_path}. "
+            f"Missing keys: {len(critical_missing)} {preview_missing}; "
+            f"unexpected keys: {len(critical_unexpected)} {preview_unexpected}. "
+            "Pass the correct --backbone or use a checkpoint trained with this model definition."
+        )
+
+
 @torch.no_grad()
 def infer_backbone_feature_channels(model, input_channels=3, image_size=192):
     if hasattr(model, 'feature_channels'):
@@ -191,6 +242,27 @@ class Train_process():
         self.opt = opt
         self.n_cls = opt.nclass
         self.epoch=0
+
+        checkpoint_state = None
+        if istest == 1 and reloaddir not in [None, '0']:
+            checkpoint = torch.load(reloaddir, map_location='cpu')
+            checkpoint_state = unwrap_checkpoint_state_dict(checkpoint)
+            inferred_backbone = infer_backbone_from_state_dict(checkpoint_state)
+            requested_backbone = getattr(opt, 'backbone', 'unet')
+            if inferred_backbone is not None and requested_backbone != inferred_backbone:
+                if requested_backbone == 'unet':
+                    print(
+                        f"Auto-detected checkpoint backbone={inferred_backbone}; "
+                        f"overriding default --backbone unet for {reloaddir}"
+                    )
+                    opt.backbone = inferred_backbone
+                else:
+                    raise ValueError(
+                        f"Checkpoint backbone appears to be {inferred_backbone}, "
+                        f"but --backbone {requested_backbone} was requested. "
+                        "Use the matching --backbone value."
+                    )
+
         self.backbone = getattr(opt, 'backbone', 'unet')
         self.netseg = build_segmentation_backbone(opt, self.n_cls).cuda()
         self.feature_channels = infer_backbone_feature_channels(self.netseg)
@@ -260,8 +332,11 @@ class Train_process():
             print("reloaddir:",reloaddir)
             # Load checkpoint with strict=False to handle CGSD config mismatch.
             # This allows loading checkpoints across use_cgsd on/off transitions.
-            state_dict = torch.load(reloaddir)
+            state_dict = checkpoint_state if checkpoint_state is not None else unwrap_checkpoint_state_dict(
+                torch.load(reloaddir, map_location='cpu')
+            )
             missing_keys, unexpected_keys = self.netseg.load_state_dict(state_dict, strict=False)
+            validate_checkpoint_load(missing_keys, unexpected_keys, reloaddir)
 
             if len(unexpected_keys) > 0:
                 print(f"⚠️  Warning: Ignoring unexpected keys in checkpoint: {unexpected_keys}")

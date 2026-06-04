@@ -225,43 +225,53 @@ def write_summary(path, results, tau):
     return rows
 
 
-def plot_distribution(path_png, path_pdf, plot_values, summary_rows, tau):
+def plot_distribution(path_png, path_pdf, plot_values, summary_rows, tau, x_upper):
     labels = [item["variant"] for item in plot_values]
     values = [item["values"] for item in plot_values]
-    fig, ax = plt.subplots(figsize=(7.2, 5.2), constrained_layout=True)
-    parts = ax.violinplot(values, showmeans=False, showmedians=False, showextrema=False)
+    fig, ax = plt.subplots(figsize=(7.4, 4.2), constrained_layout=True)
     colors = ["#8da0cb", "#fc8d62"]
-    for body, color in zip(parts["bodies"], colors):
-        body.set_facecolor(color)
-        body.set_edgecolor("#333333")
-        body.set_alpha(0.55)
 
-    ax.boxplot(
+    box = ax.boxplot(
         values,
-        widths=0.25,
-        showfliers=False,
+        vert=False,
+        labels=labels,
+        widths=0.62,
+        showfliers=True,
         patch_artist=True,
         medianprops={"color": "black", "linewidth": 1.8},
-        boxprops={"facecolor": "white", "edgecolor": "#222222", "linewidth": 1.2},
-        whiskerprops={"color": "#222222", "linewidth": 1.1},
-        capprops={"color": "#222222", "linewidth": 1.1},
+        boxprops={"edgecolor": "#4d4d4d", "linewidth": 1.8},
+        whiskerprops={"color": "#666666", "linewidth": 1.6},
+        capprops={"color": "#666666", "linewidth": 1.6},
+        flierprops={
+            "marker": "o",
+            "markerfacecolor": "#4d4d4d",
+            "markeredgecolor": "none",
+            "markersize": 2.0,
+            "alpha": 0.22,
+        },
     )
-    ax.axhline(tau, color="#cc0000", linestyle="--", linewidth=1.2, label=f"tau={tau:.4f}")
-    ax.set_xticks(np.arange(1, len(labels) + 1))
-    ax.set_xticklabels(labels)
-    ax.set_ylabel("d_stab")
-    ax.set_title("SAAM d_stab Distribution at Final Checkpoint")
-    ax.grid(axis="y", alpha=0.25)
-    ax.legend(loc="upper right")
+    for patch, color in zip(box["boxes"], colors):
+        patch.set_facecolor(color)
+        patch.set_alpha(0.78)
 
-    for xpos, row in enumerate(summary_rows, start=1):
+    ax.axvline(tau, color="#cc0000", linestyle="--", linewidth=1.4, label=f"tau={tau:.4f}")
+    ax.set_xlim(0.0, x_upper)
+    ax.set_xlabel("d_stab")
+    ax.set_ylabel("Variant")
+    ax.set_title("SAAM d_stab Distribution at Final Checkpoint")
+    ax.grid(axis="x", alpha=0.25)
+    ax.legend(loc="lower right", frameon=True)
+
+    text_x = x_upper * 0.97
+    for ypos, row in enumerate(summary_rows, start=1):
         ax.text(
-            xpos,
-            ax.get_ylim()[1] * 0.96,
+            text_x,
+            ypos + 0.31,
             f"mean={float(row['mean_d_stab']):.4f}\nunstable={float(row['unstable_ratio']):.3f}",
-            ha="center",
-            va="top",
+            ha="right",
+            va="center",
             fontsize=9,
+            bbox={"boxstyle": "round,pad=0.22", "facecolor": "white", "edgecolor": "none", "alpha": 0.72},
         )
 
     fig.savefig(path_png, dpi=200)
@@ -323,6 +333,9 @@ def main():
         for name, use_cgsd in VARIANTS
     ]
     combined = torch.cat([result["values"] for result in results])
+    x_upper = float(torch.quantile(combined, 0.99).item())
+    if not math.isfinite(x_upper) or x_upper <= 0:
+        x_upper = float(combined.max().item())
     if args.dstab_tau is not None:
         tau = float(args.dstab_tau)
         tau_mode = "fixed"
@@ -346,6 +359,7 @@ def main():
         plot_values,
         summary_rows,
         tau,
+        x_upper,
     )
     plot_unstable_bar(
         out_dir / "unstable_ratio_bar.png",

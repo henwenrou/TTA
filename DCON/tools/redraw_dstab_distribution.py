@@ -17,6 +17,10 @@ def parse_args():
                         help="Directory containing dstab_values.npz and dstab_summary.csv.")
     parser.add_argument("--clip_percentile", type=float, default=95.0,
                         help="x-axis upper limit percentile over combined d_stab values.")
+    parser.add_argument("--xlim_max", type=float, default=None,
+                        help="Fixed x-axis upper limit. Overrides --clip_percentile when set.")
+    parser.add_argument("--box_width", type=float, default=0.72,
+                        help="Horizontal box thickness.")
     parser.add_argument("--show_fliers", action="store_true",
                         help="Show outliers. Default hides them for a cleaner paper figure.")
     parser.add_argument("--flier_size", type=float, default=0.5)
@@ -46,16 +50,21 @@ def ordered_values(npz, summary_rows):
 
 def plot_distribution(result_dir, labels, values, summary_rows, args):
     combined = np.concatenate(values)
-    x_upper = float(np.percentile(combined, args.clip_percentile))
+    if args.xlim_max is not None:
+        x_upper = float(args.xlim_max)
+        x_note = f"x-axis truncated at {x_upper:g} for visualization"
+    else:
+        x_upper = float(np.percentile(combined, args.clip_percentile))
+        x_note = f"x-axis truncated at P{args.clip_percentile:g} for visualization"
     tau = float(summary_rows[0]["tau"])
 
-    fig, ax = plt.subplots(figsize=(7.4, 4.2), constrained_layout=True)
+    fig, ax = plt.subplots(figsize=(7.0, 3.8), constrained_layout=True)
     colors = ["#8da0cb", "#fc8d62"]
     box = ax.boxplot(
         values,
         vert=False,
         labels=labels,
-        widths=0.62,
+        widths=args.box_width,
         showfliers=args.show_fliers,
         patch_artist=True,
         medianprops={"color": "black", "linewidth": 1.8},
@@ -84,7 +93,7 @@ def plot_distribution(result_dir, labels, values, summary_rows, args):
     ax.text(
         0.01,
         0.02,
-        f"x-axis clipped at P{args.clip_percentile:g} for visualization",
+        x_note,
         transform=ax.transAxes,
         ha="left",
         va="bottom",
@@ -149,6 +158,10 @@ def main():
         raise FileNotFoundError(f"{summary_path} not found.")
     if not (0.0 < args.clip_percentile <= 100.0):
         raise ValueError("--clip_percentile must be in (0, 100].")
+    if args.xlim_max is not None and args.xlim_max <= 0:
+        raise ValueError("--xlim_max must be > 0.")
+    if not (0.0 < args.box_width <= 1.0):
+        raise ValueError("--box_width must be in (0, 1].")
 
     summary_rows = read_summary(summary_path)
     npz = np.load(values_path)

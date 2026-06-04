@@ -75,6 +75,10 @@ def parse_args():
                         help="Per-variant random subsample size for violin plotting; summary uses all values.")
     parser.add_argument("--boxplot_clip_percentile", type=float, default=99.0,
                         help="x-axis upper limit percentile computed from combined d_stab values.")
+    parser.add_argument("--xlim_max", type=float, default=None,
+                        help="Fixed x-axis upper limit. Overrides --boxplot_clip_percentile when set.")
+    parser.add_argument("--box_width", type=float, default=0.72,
+                        help="Horizontal box thickness.")
     parser.add_argument("--flier_size", type=float, default=0.5)
     parser.add_argument("--flier_alpha", type=float, default=0.15)
     parser.add_argument("--hide_fliers", action="store_true",
@@ -245,7 +249,7 @@ def plot_distribution(path_png, path_pdf, plot_values, summary_rows, tau, x_uppe
         values,
         vert=False,
         labels=labels,
-        widths=0.62,
+        widths=args.box_width,
         showfliers=not args.hide_fliers,
         patch_artist=True,
         medianprops={"color": "black", "linewidth": 1.8},
@@ -272,7 +276,11 @@ def plot_distribution(path_png, path_pdf, plot_values, summary_rows, tau, x_uppe
     ax.text(
         0.01,
         0.02,
-        f"x-axis clipped at P{args.boxplot_clip_percentile:g} for visualization",
+        (
+            f"x-axis truncated at {args.xlim_max:g} for visualization"
+            if args.xlim_max is not None
+            else f"x-axis truncated at P{args.boxplot_clip_percentile:g} for visualization"
+        ),
         transform=ax.transAxes,
         ha="left",
         va="bottom",
@@ -331,6 +339,10 @@ def main():
         raise ValueError("--dstab_tau_percentile must be in (0, 100).")
     if not (0.0 < args.boxplot_clip_percentile <= 100.0):
         raise ValueError("--boxplot_clip_percentile must be in (0, 100].")
+    if args.xlim_max is not None and args.xlim_max <= 0:
+        raise ValueError("--xlim_max must be > 0.")
+    if not (0.0 < args.box_width <= 1.0):
+        raise ValueError("--box_width must be in (0, 1].")
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.gpu_ids
     set_seed(args.seed)
@@ -359,7 +371,10 @@ def main():
         for name, use_cgsd in VARIANTS
     ]
     combined = torch.cat([result["values"] for result in results])
-    x_upper = float(torch.quantile(combined, args.boxplot_clip_percentile / 100.0).item())
+    if args.xlim_max is not None:
+        x_upper = float(args.xlim_max)
+    else:
+        x_upper = float(torch.quantile(combined, args.boxplot_clip_percentile / 100.0).item())
     if not math.isfinite(x_upper) or x_upper <= 0:
         x_upper = float(combined.max().item())
     if args.dstab_tau is not None:

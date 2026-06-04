@@ -3004,6 +3004,11 @@ class Train_process():
         save_path = os.path.join(snapshot_dir, save_filename)
         print("save_path:",save_path)
         torch.save(self.netseg.state_dict(), save_path)
+        if getattr(self, 'projector_str', None) is not None:
+            projector_filename = '%s_net_%s.pth' % (label, 'Projector')
+            projector_path = os.path.join(snapshot_dir, projector_filename)
+            print("projector_path:", projector_path)
+            torch.save(self.projector_str.state_dict(), projector_path)
 
 
     def get_lr(self):

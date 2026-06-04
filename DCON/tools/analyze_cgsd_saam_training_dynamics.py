@@ -33,7 +33,7 @@ import dataloaders.AbdominalDataset as ABD
 import dataloaders.CardiacDataset as CARD
 from dataloaders.location_scale_augmentation import LocationScaleAugmentation
 from models.saam import StabilityAwareAlignmentModule
-from models.unet import Unet1
+from models.unet import Projector, Unet1
 
 
 DATASET_NCLASS = {"CARDIAC": 4, "ABDOMINAL": 5}
@@ -61,8 +61,8 @@ def parse_args():
                         help="w/ CGSD checkpoint template containing {epoch}.")
     parser.add_argument("--wo_cgsd_ckpt_template", required=True,
                         help="w/o CGSD checkpoint template containing {epoch}.")
-    parser.add_argument("--epochs", default="50:300:25",
-                        help="Epoch list/range, default 50:300:25.")
+    parser.add_argument("--epochs", default="50,75,100,125,150,175,200,225,250,275,300",
+                        help="Epoch list/range, default 50,75,...,300.")
     parser.add_argument("--data_name", required=True, choices=["CARDIAC", "ABDOMINAL"])
     parser.add_argument("--tr_domain", "--source", dest="tr_domain", required=True)
     parser.add_argument("--target_domain", "--target", dest="target_domain", default=None)
@@ -90,6 +90,16 @@ def parse_args():
                         help="Candidate aggregation: mean,median.")
     parser.add_argument("--smooth_list", default="1,2",
                         help="Candidate moving-average windows: 1,2.")
+    parser.add_argument("--feature_space", default="projector", choices=["projector", "gap"],
+                        help="Compute D_style/D_struct in trained CGSD projector space when available.")
+    parser.add_argument("--proj_dim", type=int, default=1024)
+    parser.add_argument("--proj_hidden_channels", type=int, default=8)
+    parser.add_argument("--effective_rank_k", type=int, default=8,
+                        help="Number of strong views per sample for style effective-rank diagnostics.")
+    parser.add_argument("--effective_rank_distance", default="cosine", choices=["cosine", "l2"],
+                        help="Distance used for the D_style curve paired with effective rank.")
+    parser.add_argument("--effective_rank_stat", default="mean", choices=["mean", "median"],
+                        help="Sample aggregation used for the D_style curve paired with effective rank.")
     parser.add_argument("--unstable_tau", type=float, default=None,
                         help="Fixed tau for unstable ratio. If unset, use final checkpoint quantile.")
     parser.add_argument("--unstable_tau_quantile", type=float, default=0.75,
@@ -225,6 +235,60 @@ def load_model(ckpt_path, use_cgsd, args, device):
     return model
 
 
+def projector_path_from_seg_ckpt(seg_ckpt):
+    path = Path(seg_ckpt)
+    return path.with_name(path.name.replace("_net_Seg.pth", "_net_Projector.pth"))
+
+
+def load_projector_for_epoch(full_ckpt, args, device):
+    if args.feature_space != "projector":
+        return None
+    projector_path = projector_path_from_seg_ckpt(full_ckpt)
+    if not projector_path.exists():
+        print(f"[WARN] Projector checkpoint not found, using GAP distances: {projector_path}")
+        return None
+    state = torch.load(str(projector_path), map_location="cpu")
+    projector = None
+    print(f"[INFO] loaded projector checkpoint: {projector_path}")
+    return {"state": state, "module": projector}
+
+
+def project_feature(feature, projector_holder, args, device):
+    if projector_holder is None:
+        return F.adaptive_avg_pool2d(feature, 1).flatten(1)
+    if projector_holder["module"] is None:
+        projector = Projector(
+            in_channels=feature.shape[1],
+            hidden_channels=args.proj_hidden_channels,
+            proj_dim=args.proj_dim,
+            feature_size=feature.shape[-1],
+        ).to(device)
+        projector.load_state_dict(projector_holder["state"], strict=True)
+        projector.eval()
+        for param in projector.parameters():
+            param.requires_grad_(False)
+        projector_holder["module"] = projector
+    return projector_holder["module"](feature)
+
+
+def effective_rank(z, eps=1e-12):
+    """
+    z: Tensor, shape [num_embeddings, C]
+    return: scalar effective rank
+    """
+    z = z.float()
+    z = z - z.mean(dim=0, keepdim=True)
+
+    if z.shape[0] <= 1:
+        return 0.0
+
+    cov = z.T @ z / (z.shape[0] - 1)
+    eigvals = torch.linalg.eigvalsh(cov).clamp_min(eps)
+    p = eigvals / eigvals.sum().clamp_min(eps)
+    erank = torch.exp(-(p * torch.log(p)).sum())
+    return erank.item()
+
+
 def channel_gate_weights(full_model):
     gate = full_model.chan_gate
     if gate.use_temperature:
@@ -297,9 +361,9 @@ def deterministic_base_and_strongs(dataset, index, max_views, args):
     return image_tensor(base), [image_tensor(x) for x in strongs], record
 
 
-def vector_distance(fa, fb, metric):
-    za = F.adaptive_avg_pool2d(fa, 1).flatten(1)
-    zb = F.adaptive_avg_pool2d(fb, 1).flatten(1)
+def vector_distance(fa, fb, metric, projector_holder, args, device):
+    za = project_feature(fa, projector_holder, args, device)
+    zb = project_feature(fb, projector_holder, args, device)
     if metric == "cosine":
         dist = 1.0 - F.cosine_similarity(za, zb, dim=1)
     elif metric == "l2":
@@ -356,7 +420,7 @@ def unique_dir(path):
         idx += 1
 
 
-def collect_epoch_variant(model, variant, full_gate, dataset, epoch, max_views, saam, args, device):
+def collect_epoch_variant(model, variant, full_gate, projector_holder, dataset, epoch, max_views, saam, args, device):
     max_slices = args.max_slices if args.max_slices > 0 else len(dataset)
     max_slices = min(max_slices, len(dataset))
     records = []
@@ -382,6 +446,7 @@ def collect_epoch_variant(model, variant, full_gate, dataset, epoch, max_views, 
                 "dice": dice,
                 "d_struct": defaultdict(list),
                 "d_style": defaultdict(list),
+                "style_embeddings": [],
                 "d_stab_scalar": [],
                 "d_stab_values": [],
             }
@@ -397,8 +462,14 @@ def collect_epoch_variant(model, variant, full_gate, dataset, epoch, max_views, 
                     f_style_strong = raw_strong * style_w.to(raw_strong.device)
 
                 for metric in ("cosine", "l2"):
-                    sample["d_struct"][metric].append(vector_distance(f_struct_base, f_struct_strong, metric))
-                    sample["d_style"][metric].append(vector_distance(f_style_base, f_style_strong, metric))
+                    sample["d_struct"][metric].append(
+                        vector_distance(f_struct_base, f_struct_strong, metric, projector_holder, args, device)
+                    )
+                    sample["d_style"][metric].append(
+                        vector_distance(f_style_base, f_style_strong, metric, projector_holder, args, device)
+                    )
+                z_style = project_feature(f_style_strong, projector_holder, args, device)
+                sample["style_embeddings"].append(z_style.detach().cpu())
 
                 d_map = saam.compute_pairwise_distance(enc_base, enc_strong)
                 d_values = d_map.detach().reshape(-1).float().cpu()
@@ -427,18 +498,61 @@ def collect_all(args, epochs, max_views, device):
             raise FileNotFoundError(f"Missing w/o CGSD checkpoint: {wo_ckpt}")
         full_model = load_model(full_ckpt, use_cgsd=True, args=args, device=device)
         full_gate = channel_gate_weights(full_model)
+        projector_holder = load_projector_for_epoch(full_ckpt, args, device)
         wo_model = load_model(wo_ckpt, use_cgsd=False, args=args, device=device)
         data[(epoch, VARIANT_FULL)] = collect_epoch_variant(
-            full_model, VARIANT_FULL, full_gate, dataset, epoch, max_views, saam, args, device
+            full_model, VARIANT_FULL, full_gate, projector_holder, dataset, epoch, max_views, saam, args, device
         )
         data[(epoch, VARIANT_WO)] = collect_epoch_variant(
-            wo_model, VARIANT_WO, full_gate, dataset, epoch, max_views, saam, args, device
+            wo_model, VARIANT_WO, full_gate, projector_holder, dataset, epoch, max_views, saam, args, device
         )
         del full_model
         del wo_model
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
     return data
+
+
+def build_effective_rank_rows(data, epochs, args):
+    rows = []
+    task = f"{args.tr_domain}_to_{args.target_domain}"
+    for epoch in epochs:
+        for variant in (VARIANT_FULL, VARIANT_WO):
+            records = data[(epoch, variant)]
+            d_style_samples = sample_metric(
+                records,
+                "d_style",
+                args.effective_rank_distance,
+                args.effective_rank_k,
+                args.effective_rank_stat,
+            )
+            embeddings = []
+            for rec in records:
+                embeddings.extend(rec["style_embeddings"][:args.effective_rank_k])
+            if embeddings:
+                z_style = torch.cat(embeddings, dim=0)
+                erank = effective_rank(z_style)
+                num_embeddings = int(z_style.shape[0])
+                embedding_dim = int(z_style.shape[1])
+            else:
+                erank = math.nan
+                num_embeddings = 0
+                embedding_dim = 0
+            rows.append({
+                "variant": variant,
+                "epoch": epoch,
+                "task": task,
+                "K": args.effective_rank_k,
+                "distance": args.effective_rank_distance,
+                "stat": args.effective_rank_stat,
+                "feature_space": args.feature_space,
+                "D_style": aggregate(d_style_samples, args.effective_rank_stat),
+                "Effective_Rank": erank,
+                "num_embeddings": num_embeddings,
+                "embedding_dim": embedding_dim,
+                "num_samples": len(records),
+            })
+    return rows
 
 
 def sample_metric(records, key, distance, num_views, stat):
@@ -537,6 +651,49 @@ def write_csv(path, rows):
         writer = csv.DictWriter(f, fieldnames=fieldnames)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def write_effective_rank_csv(path, rows):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "variant", "epoch", "task", "K", "distance", "stat", "feature_space",
+        "D_style", "Effective_Rank", "num_embeddings", "embedding_dim", "num_samples",
+    ]
+    with path.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def plot_style_effective_rank(rows, out_png, out_pdf):
+    fig, axes = plt.subplots(1, 2, figsize=(10, 4), constrained_layout=True)
+    specs = [
+        ("D_style", "D_style vs Epoch", "D_style"),
+        ("Effective_Rank", "Effective Rank vs Epoch", "Effective Rank"),
+    ]
+    for ax, (metric, title, ylabel) in zip(axes, specs):
+        for variant, style, label in (
+            (VARIANT_FULL, "-", "w/ CGSD"),
+            (VARIANT_WO, "--", "w/o CGSD"),
+        ):
+            selected = [r for r in rows if r["variant"] == variant]
+            selected.sort(key=lambda r: int(r["epoch"]))
+            ax.plot(
+                [r["epoch"] for r in selected],
+                [r[metric] for r in selected],
+                linestyle=style,
+                marker="o",
+                linewidth=1.8,
+                label=label,
+            )
+        ax.set_title(title)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel(ylabel)
+        ax.grid(alpha=0.25)
+        ax.legend()
+    fig.savefig(out_png, dpi=180)
+    fig.savefig(out_pdf)
+    plt.close(fig)
 
 
 def plot_candidate(rows, out_png, out_pdf):
@@ -669,6 +826,8 @@ def main():
         raise ValueError("All K values must be >= 1.")
     if any(w < 1 for w in smooth_values):
         raise ValueError("All smooth windows must be >= 1.")
+    if args.effective_rank_k < 1:
+        raise ValueError("--effective_rank_k must be >= 1.")
     if args.unstable_tau is None and not (0.0 < args.unstable_tau_quantile < 1.0):
         raise ValueError("--unstable_tau_quantile must be in (0, 1).")
 
@@ -684,7 +843,15 @@ def main():
         for stat in stats
         for smooth in smooth_values
     ]
-    data = collect_all(args, epochs, max(k_values), device)
+    data = collect_all(args, epochs, max(max(k_values), args.effective_rank_k), device)
+
+    effective_rank_rows = build_effective_rank_rows(data, epochs, args)
+    write_effective_rank_csv(root_out / "cgsd_style_effective_rank.csv", effective_rank_rows)
+    plot_style_effective_rank(
+        effective_rank_rows,
+        root_out / "cgsd_style_effective_rank.png",
+        root_out / "cgsd_style_effective_rank.pdf",
+    )
 
     selection_rows = []
     all_candidate_rows = []

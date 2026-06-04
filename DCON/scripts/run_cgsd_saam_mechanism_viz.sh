@@ -12,7 +12,7 @@ TARGET="${TARGET:-}"
 GPU_IDS="${GPU_IDS:-0}"
 SEED="${SEED:-2026}"
 CKPT_DIR="${CKPT_DIR:-./ckpts}"
-EPOCHS="${EPOCHS:-50:300:25}"
+EPOCHS="${EPOCHS:-50,75,100,125,150,175,200,225,250,275,300}"
 MAX_SLICES="${MAX_SLICES:-0}"
 SPLIT="${SPLIT:-target_test}"
 
@@ -41,7 +41,7 @@ else
   TAU_ARGS+=(--unstable_tau_quantile "${UNSTABLE_TAU_QUANTILE:-0.75}")
 fi
 
-python tools/analyze_cgsd_saam_training_dynamics.py \
+"${PYTHON:-python3}" tools/analyze_cgsd_saam_training_dynamics.py \
   --full_ckpt_template "${CKPT_DIR}/${SOURCE}/${FULL_EXP}/snapshots/{epoch}_net_Seg.pth" \
   --wo_cgsd_ckpt_template "${CKPT_DIR}/${SOURCE}/${WO_EXP}/snapshots/{epoch}_net_Seg.pth" \
   --epochs "${EPOCHS}" \
@@ -54,8 +54,12 @@ python tools/analyze_cgsd_saam_training_dynamics.py \
   --seed "${SEED}" \
   --max_slices "${MAX_SLICES}" \
   --num_views_list "${NUM_VIEWS_LIST:-4,8}" \
+  --effective_rank_k "${ERANK_K:-8}" \
+  --effective_rank_distance "${ERANK_DISTANCE:-cosine}" \
+  --effective_rank_stat "${ERANK_STAT:-mean}" \
   --distance_list "${DISTANCE_LIST:-cosine,l2}" \
   --stat_list "${STAT_LIST:-mean,median}" \
   --smooth_list "${SMOOTH_LIST:-1,2}" \
+  --feature_space "${FEATURE_SPACE:-projector}" \
   --tau_source "${TAU_SOURCE:-combined}" \
   "${TAU_ARGS[@]}"

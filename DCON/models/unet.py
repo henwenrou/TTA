@@ -599,12 +599,11 @@ class SwinUNetWrapper(nn.Module):
     def __init__(self, c=3, num_classes=2, base_channels=24, window_size=7):
         super().__init__()
         channels = [base_channels, base_channels * 2, base_channels * 4, base_channels * 8]
+        high_channels = max(base_channels // 2, 8)
         self.feature_channels = channels[-1]
 
-        self.stem = nn.Sequential(
-            ConvNormAct(c, channels[0], norm='bn', activation='relu'),
-            ConvNormAct(channels[0], channels[0], norm='bn', activation='relu'),
-        )
+        self.high_res_stem = ConvNormAct(c, high_channels, norm='bn', activation='relu')
+        self.patch_embed = ConvNormAct(high_channels, channels[0], stride=2, norm='bn', activation='relu')
         self.stage1 = SwinStage(channels[0], depth=2, num_heads=2, window_size=window_size)
         self.down2 = ConvNormAct(channels[0], channels[1], stride=2, norm='bn', activation='relu')
         self.stage2 = SwinStage(channels[1], depth=2, num_heads=4, window_size=window_size)
@@ -619,7 +618,9 @@ class SwinUNetWrapper(nn.Module):
         self.dec2 = NNUNetConvBlock(channels[1] * 2, channels[1], norm='bn')
         self.up1 = nn.ConvTranspose2d(channels[1], channels[0], kernel_size=2, stride=2)
         self.dec1 = NNUNetConvBlock(channels[0] * 2, channels[0], norm='bn')
-        self.seg = nn.Conv2d(channels[0], num_classes, kernel_size=1)
+        self.up0 = nn.ConvTranspose2d(channels[0], high_channels, kernel_size=2, stride=2)
+        self.dec0 = NNUNetConvBlock(high_channels * 2, high_channels, norm='bn')
+        self.seg = nn.Conv2d(high_channels, num_classes, kernel_size=1)
         self._init_weights()
 
     def _init_weights(self):
@@ -646,7 +647,8 @@ class SwinUNetWrapper(nn.Module):
 
     def forward(self, x, return_feat=False):
         input_size = x.shape[-2:]
-        x1 = self.stage1(self.stem(x))
+        x0 = self.high_res_stem(x)
+        x1 = self.stage1(self.patch_embed(x0))
         x2 = self.stage2(self.down2(x1))
         x3 = self.stage3(self.down3(x2))
         feat = self.stage4(self.down4(x3))
@@ -657,8 +659,10 @@ class SwinUNetWrapper(nn.Module):
         y2 = self.dec2(torch.cat([y2, x2], dim=1))
         y1 = self._match_size(self.up1(y2), x1)
         y1 = self.dec1(torch.cat([y1, x1], dim=1))
+        y0 = self._match_size(self.up0(y1), x0)
+        y0 = self.dec0(torch.cat([y0, x0], dim=1))
 
-        logits = self.seg(y1)
+        logits = self.seg(y0)
         if logits.shape[-2:] != input_size:
             logits = F.interpolate(logits, size=input_size, mode='bilinear', align_corners=False)
         return logits, feat

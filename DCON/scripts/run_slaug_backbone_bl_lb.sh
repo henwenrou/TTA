@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Run DCON/SAA backbone ablations on the four source-target shifts.
+# Run SLAug-only baseline on CARDIAC BL/LB for backbone comparison.
+#
+# This keeps the DCON data split/evaluation protocol but disables SAAM/CGSD/RCCS/SGF
+# so the run can be used as a same-backbone baseline against SAA/SAAM runs.
 #
 # Examples:
-#   bash scripts/run_backbone_ablation.sh
-#   BACKBONES="nnunet swinunet" EPOCHS_OVERRIDE=20 DRY_RUN=1 bash scripts/run_backbone_ablation.sh
-#   BACKBONES="nnunet swinunet" ONLY_TASKS="bl lb" CARDIAC_BL_EPOCHS=500 CARDIAC_LB_EPOCHS=900 bash scripts/run_backbone_ablation.sh
-#   PYTHON_BIN=/path/to/python SAA_DATA_ROOT=/path/to/data bash scripts/run_backbone_ablation.sh
+#   BACKBONES="nnunet swinunet" CARDIAC_BL_EPOCHS=500 CARDIAC_LB_EPOCHS=900 bash scripts/run_slaug_backbone_bl_lb.sh
+#   BACKBONES="swinunet" SWIN_BATCH_SIZE=8 ONLY_TASKS="bl" DRY_RUN=1 bash scripts/run_slaug_backbone_bl_lb.sh
 
 set -euo pipefail
 
@@ -32,9 +33,9 @@ if [ -z "${SAA_DATA_ROOT:-}" ]; then
   fi
 fi
 
-RESULTS_ROOT="${RESULTS_ROOT:-results_backbone_ablation}"
-BACKBONES="${BACKBONES:-unet nnunet swinunet}"
-ONLY_TASKS="${ONLY_TASKS:-all}"
+RESULTS_ROOT="${RESULTS_ROOT:-results_slaug_backbone_bl_lb}"
+BACKBONES="${BACKBONES:-nnunet swinunet}"
+ONLY_TASKS="${ONLY_TASKS:-bl lb}"
 GPU_IDS="${GPU_IDS:-0}"
 NUM_WORKERS="${NUM_WORKERS:-8}"
 BATCH_SIZE="${BATCH_SIZE:-20}"
@@ -43,16 +44,11 @@ LR="${LR:-0.0005}"
 SEED="${SEED:-42}"
 VALIDATION_FREQ="${VALIDATION_FREQ:-50}"
 SAVE_FREQ="${SAVE_FREQ:-100}"
-SAVE_PREDICTION="${SAVE_PREDICTION:-True}"
-EVAL_SOURCE_DOMAIN="${EVAL_SOURCE_DOMAIN:-True}"
+SAVE_PREDICTION="${SAVE_PREDICTION:-False}"
+EVAL_SOURCE_DOMAIN="${EVAL_SOURCE_DOMAIN:-False}"
+LOCAL_AUG_TYPE="${LOCAL_AUG_TYPE:-lla}"
 DRY_RUN="${DRY_RUN:-0}"
 FORCE="${FORCE:-0}"
-
-USE_SGF="${USE_SGF:-1}"
-USE_CGSD="${USE_CGSD:-1}"
-USE_PROJECTOR="${USE_PROJECTOR:-1}"
-USE_SAAM="${USE_SAAM:-1}"
-USE_RCCS="${USE_RCCS:-0}"
 
 if [ ! -d "${SAA_DATA_ROOT}" ]; then
   echo "SAA_DATA_ROOT does not exist: ${SAA_DATA_ROOT}" >&2
@@ -75,18 +71,14 @@ should_run_task() {
 
 run_one() {
   local backbone="$1"
-  local data_name="$2"
-  local nclass="$3"
-  local source="$4"
-  local target="$5"
-  local epochs="$6"
-  local sgf_grid="$7"
-  local display_freq="$8"
+  local source="$2"
+  local target="$3"
+  local epochs="$4"
 
-  local run_name="${backbone}_${source}_to_${target}"
+  local run_name="${backbone}_slaug_${source}_to_${target}"
   local run_dir="${PROJECT_DIR}/${RESULTS_ROOT}/${run_name}"
   local work_dir="${run_dir}/_work"
-  local expname="dcon_saa"
+  local expname="slaug"
   local ckpt_work="${work_dir}/ckpts"
   local run_log="${run_dir}/train_stdout.log"
   local effective_batch_size="${BATCH_SIZE}"
@@ -115,47 +107,31 @@ run_one() {
     --batchSize "${effective_batch_size}"
     --all_epoch "${epochs}"
     --validation_freq "${VALIDATION_FREQ}"
-    --display_freq "${display_freq}"
+    --display_freq 5000
     --save_freq "${SAVE_FREQ}"
-    --data_name "${data_name}"
-    --nclass "${nclass}"
+    --data_name CARDIAC
+    --nclass 4
     --tr_domain "${source}"
     --target_domain "${target}"
     --num_workers "${NUM_WORKERS}"
     --save_prediction "${SAVE_PREDICTION}"
     --eval_source_domain "${EVAL_SOURCE_DOMAIN}"
+    --local_aug_type "${LOCAL_AUG_TYPE}"
     --w_ce 1.0
     --w_dice 1.0
     --w_seg 1.0
-    --use_sgf "${USE_SGF}"
-    --sgf_grid_size "${sgf_grid}"
-    --use_cgsd "${USE_CGSD}"
-    --cgsd_layer 1
-    --use_projector "${USE_PROJECTOR}"
-    --use_separate_cgsd_optimizer 1
-    --lambda_str 0.3
-    --lambda_sty 0.3
-    --use_saam "${USE_SAAM}"
-    --saam_tau 0.5
-    --saam_topk 0.3
-    --saam_stability_mode mean
-    --lambda_01 1.0
-    --lambda_02 1.0
-    --saam_warmup_epochs 50
-    --saam_rampup_epochs 100
-    --anchor_seg_alpha 0.0
-    --strong_seg_alpha 1.0
-    --use_rccs "${USE_RCCS}"
-    --p_rccs 0.3
-    --rccs_candidates 4
-    --rccs_metric cos
-    --rccs_embed_dim 128
+    --seg_alpha_view2 1.0
+    --use_sgf 0
+    --use_cgsd 0
+    --use_projector 0
+    --use_saam 0
+    --use_rccs 0
   )
 
   echo "=========================================="
-  echo "Backbone ablation: ${data_name} ${source}->${target}, backbone=${backbone}"
+  echo "SLAug backbone baseline: CARDIAC ${source}->${target}, backbone=${backbone}"
   echo "Output: ${run_dir}"
-  echo "Batch size: ${effective_batch_size}"
+  echo "Epochs: ${epochs}; batch_size=${effective_batch_size}; local_aug_type=${LOCAL_AUG_TYPE}"
   echo "=========================================="
   if [ "${DRY_RUN}" = "1" ]; then
     printf '%q ' "${cmd[@]}"
@@ -182,23 +158,16 @@ echo "Tasks: ${ONLY_TASKS}"
 echo
 
 for backbone in ${BACKBONES}; do
-  ab_epochs="${EPOCHS_OVERRIDE:-1500}"
   cardiac_default_epochs="${EPOCHS_OVERRIDE:-1800}"
   card_bl_epochs="${CARDIAC_BL_EPOCHS:-${cardiac_default_epochs}}"
   card_lb_epochs="${CARDIAC_LB_EPOCHS:-${cardiac_default_epochs}}"
 
-  if should_run_task "sc"; then
-    run_one "${backbone}" "ABDOMINAL" 5 "SABSCT" "CHAOST2" "${ab_epochs}" 3 2000
-  fi
-  if should_run_task "cs"; then
-    run_one "${backbone}" "ABDOMINAL" 5 "CHAOST2" "SABSCT" "${ab_epochs}" 3 2000
-  fi
   if should_run_task "bl"; then
-    run_one "${backbone}" "CARDIAC" 4 "bSSFP" "LGE" "${card_bl_epochs}" 18 5000
+    run_one "${backbone}" "bSSFP" "LGE" "${card_bl_epochs}"
   fi
   if should_run_task "lb"; then
-    run_one "${backbone}" "CARDIAC" 4 "LGE" "bSSFP" "${card_lb_epochs}" 18 5000
+    run_one "${backbone}" "LGE" "bSSFP" "${card_lb_epochs}"
   fi
 done
 
-echo "Backbone ablation runs completed."
+echo "SLAug backbone baseline runs completed."

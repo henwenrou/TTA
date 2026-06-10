@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="520" viewBox="0 0 760 520">
+<rect width="100%" height="100%" fill="white"/>
+<text x="380.0" y="28" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700">Effective Rank vs Epoch</text>
+<rect x="92" y="54" width="634" height="388" fill="none" stroke="#222" stroke-width="1.4"/>
+<line x1="92" y1="396.27" x2="726" y2="396.27" stroke="#dddddd" stroke-width="1"/>
+<text x="82" y="401.27" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#333">1.3</text>
+<line x1="92" y1="289.49" x2="726" y2="289.49" stroke="#dddddd" stroke-width="1"/>
+<text x="82" y="294.49" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#333">1.4</text>
+<line x1="92" y1="182.72" x2="726" y2="182.72" stroke="#dddddd" stroke-width="1"/>
+<text x="82" y="187.72" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#333">1.5</text>
+<line x1="92" y1="75.95" x2="726" y2="75.95" stroke="#dddddd" stroke-width="1"/>
+<text x="82" y="80.95" text-anchor="end" font-family="Arial, sans-serif" font-size="14" fill="#333">1.6</text>
+<line x1="92.00" y1="442" x2="92.00" y2="448" stroke="#222" stroke-width="1"/>
+<text x="92.00" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#333">50</text>
+<line x1="155.40" y1="442" x2="155.40" y2="448" stroke="#222" stroke-width="1"/>
+<text x="155.40" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#333">75</text>
+<line x1="218.80" y1="442" x2="218.80" y2="448" stroke="#222" stroke-width="1"/>
+<text x="218.80" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#333">100</text>
+<line x1="282.20" y1="442" x2="282.20" y2="448" stroke="#222" stroke-width="1"/>
+<text x="282.20" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#333">125</text>
+<line x1="345.60" y1="442" x2="345.60" y2="448" stroke="#222" stroke-width="1"/>
+<text x="345.60" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#333">150</text>
+<line x1="409.00" y1="442" x2="409.00" y2="448" stroke="#222" stroke-width="1"/>
+<text x="409.00" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#333">175</text>
+<line x1="472.40" y1="442" x2="472.40" y2="448" stroke="#222" stroke-width="1"/>
+<text x="472.40" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#333">200</text>
+<line x1="535.80" y1="442" x2="535.80" y2="448" stroke="#222" stroke-width="1"/>
+<text x="535.80" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#333">225</text>
+<line x1="599.20" y1="442" x2="599.20" y2="448" stroke="#222" stroke-width="1"/>
+<text x="599.20" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#333">250</text>
+<line x1="662.60" y1="442" x2="662.60" y2="448" stroke="#222" stroke-width="1"/>
+<text x="662.60" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#333">275</text>
+<line x1="726.00" y1="442" x2="726.00" y2="448" stroke="#222" stroke-width="1"/>
+<text x="726.00" y="470" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" fill="#333">300</text>
+<polyline points="92.00,193.19 155.40,297.23 218.80,226.49 282.20,184.49 345.60,212.94 409.00,86.33 472.40,279.61 535.80,165.31 599.20,157.80 662.60,175.58 726.00,161.12" fill="none" stroke="#d62728" stroke-width="3" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="92.00" cy="193.19" r="4" fill="#d62728" stroke="white" stroke-width="1"/>
+<circle cx="155.40" cy="297.23" r="4" fill="#d62728" stroke="white" stroke-width="1"/>
+<circle cx="218.80" cy="226.49" r="4" fill="#d62728" stroke="white" stroke-width="1"/>
+<circle cx="282.20" cy="184.49" r="4" fill="#d62728" stroke="white" stroke-width="1"/>
+<circle cx="345.60" cy="212.94" r="4" fill="#d62728" stroke="white" stroke-width="1"/>
+<circle cx="409.00" cy="86.33" r="4" fill="#d62728" stroke="white" stroke-width="1"/>
+<circle cx="472.40" cy="279.61" r="4" fill="#d62728" stroke="white" stroke-width="1"/>
+<circle cx="535.80" cy="165.31" r="4" fill="#d62728" stroke="white" stroke-width="1"/>
+<circle cx="599.20" cy="157.80" r="4" fill="#d62728" stroke="white" stroke-width="1"/>
+<circle cx="662.60" cy="175.58" r="4" fill="#d62728" stroke="white" stroke-width="1"/>
+<circle cx="726.00" cy="161.12" r="4" fill="#d62728" stroke="white" stroke-width="1"/>
+<polyline points="92.00,409.67 155.40,318.44 218.80,311.96 282.20,336.32 345.60,269.86 409.00,324.60 472.40,257.05 535.80,334.25 599.20,341.01 662.60,281.62 726.00,328.61" fill="none" stroke="#1f77b4" stroke-width="3" stroke-dasharray="7 5" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="92.00" cy="409.67" r="4" fill="#1f77b4" stroke="white" stroke-width="1"/>
+<circle cx="155.40" cy="318.44" r="4" fill="#1f77b4" stroke="white" stroke-width="1"/>
+<circle cx="218.80" cy="311.96" r="4" fill="#1f77b4" stroke="white" stroke-width="1"/>
+<circle cx="282.20" cy="336.32" r="4" fill="#1f77b4" stroke="white" stroke-width="1"/>
+<circle cx="345.60" cy="269.86" r="4" fill="#1f77b4" stroke="white" stroke-width="1"/>
+<circle cx="409.00" cy="324.60" r="4" fill="#1f77b4" stroke="white" stroke-width="1"/>
+<circle cx="472.40" cy="257.05" r="4" fill="#1f77b4" stroke="white" stroke-width="1"/>
+<circle cx="535.80" cy="334.25" r="4" fill="#1f77b4" stroke="white" stroke-width="1"/>
+<circle cx="599.20" cy="341.01" r="4" fill="#1f77b4" stroke="white" stroke-width="1"/>
+<circle cx="662.60" cy="281.62" r="4" fill="#1f77b4" stroke="white" stroke-width="1"/>
+<circle cx="726.00" cy="328.61" r="4" fill="#1f77b4" stroke="white" stroke-width="1"/>
+<line x1="576" y1="76" x2="610" y2="76" stroke="#d62728" stroke-width="3" stroke-linecap="round"/>
+<text x="620" y="81" font-family="Arial, sans-serif" font-size="15" fill="#111">w/ CGSD</text>
+<line x1="576" y1="102" x2="610" y2="102" stroke="#1f77b4" stroke-width="3" stroke-dasharray="7 5" stroke-linecap="round"/>
+<text x="620" y="107" font-family="Arial, sans-serif" font-size="15" fill="#111">w/o CGSD</text>
+<text x="409.0" y="502" text-anchor="middle" font-family="Arial, sans-serif" font-size="17">Epoch</text>
+<text x="24" y="248.0" text-anchor="middle" font-family="Arial, sans-serif" font-size="17" transform="rotate(-90 24 248.0)">Effective Rank</text>
+</svg>

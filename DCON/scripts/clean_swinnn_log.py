@@ -30,21 +30,21 @@ def parse_args() -> argparse.Namespace:
         "-i",
         "--input",
         type=Path,
-        default=Path("swinnn.txt"),
-        help="Raw log file to clean. Default: swinnn.txt",
+        default=Path("rccs-max.txt"),
+        help="Raw log file to clean. Default: rccs-max.txt",
     )
     parser.add_argument(
         "-o",
         "--output",
         type=Path,
-        default=Path("swinnn_cleaned.txt"),
-        help="Cleaned text output. Default: swinnn_cleaned.txt",
+        default=Path("rccs-max_cleaned.txt"),
+        help="Cleaned text output. Default: rccs-max_cleaned.txt",
     )
     parser.add_argument(
         "--csv",
         type=Path,
-        default=Path("swinnn_cleaned.csv"),
-        help="CSV summary output. Default: swinnn_cleaned.csv",
+        default=Path("rccs-max_cleaned.csv"),
+        help="CSV summary output. Default: rccs-max_cleaned.csv",
     )
     parser.add_argument(
         "--include-source",
@@ -195,13 +195,15 @@ def parse_log(text: str) -> list[dict]:
 
         if re.search(r"\bbackbone:\s*", stripped, flags=re.IGNORECASE):
             current = ensure_run(runs, current)
-            current["backbone"] = stripped.split(":", 1)[1].strip()
+            match = re.search(r"\bbackbone:\s*(.+)$", stripped, flags=re.IGNORECASE)
+            current["backbone"] = match.group(1).strip() if match else stripped.split(":", 1)[1].strip()
             i += 1
             continue
 
         if re.search(r"\bname:\s*", stripped, flags=re.IGNORECASE):
             current = ensure_run(runs, current)
-            current["expname"] = stripped.split(":", 1)[1].strip()
+            match = re.search(r"\bname:\s*(.+)$", stripped, flags=re.IGNORECASE)
+            current["expname"] = match.group(1).strip() if match else stripped.split(":", 1)[1].strip()
             i += 1
             continue
 

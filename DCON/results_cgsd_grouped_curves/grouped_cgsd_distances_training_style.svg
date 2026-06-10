@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="560" viewBox="0 0 900 560">
+<rect width="100%" height="100%" fill="white"/>
+<text x="450.0" y="34" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="26" fill="#111111">Training CGSD Distance Running Mean</text>
+<rect x="94" y="58" width="712" height="418" fill="none" stroke="#111111" stroke-width="1.8"/>
+<line x1="94" y1="476.00" x2="806" y2="476.00" stroke="#d9d9d9" stroke-width="1" opacity="0.75"/>
+<text x="82" y="482.00" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="17" fill="#d62728">0</text>
+<line x1="94" y1="366.80" x2="806" y2="366.80" stroke="#d9d9d9" stroke-width="1" opacity="0.75"/>
+<text x="82" y="372.80" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="17" fill="#d62728">0.5</text>
+<line x1="94" y1="257.60" x2="806" y2="257.60" stroke="#d9d9d9" stroke-width="1" opacity="0.75"/>
+<text x="82" y="263.60" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="17" fill="#d62728">1</text>
+<line x1="94" y1="148.39" x2="806" y2="148.39" stroke="#d9d9d9" stroke-width="1" opacity="0.75"/>
+<text x="82" y="154.39" text-anchor="end" font-family="Arial, Helvetica, sans-serif" font-size="17" fill="#d62728">1.5</text>
+<line x1="94.00" y1="58" x2="94.00" y2="476" stroke="#d9d9d9" stroke-width="1" opacity="0.75"/>
+<text x="94.00" y="510" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#111111">98.5</text>
+<line x1="221.69" y1="58" x2="221.69" y2="476" stroke="#d9d9d9" stroke-width="1" opacity="0.75"/>
+<text x="221.69" y="510" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#111111">1098</text>
+<line x1="349.38" y1="58" x2="349.38" y2="476" stroke="#d9d9d9" stroke-width="1" opacity="0.75"/>
+<text x="349.38" y="510" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#111111">2098</text>
+<line x1="477.07" y1="58" x2="477.07" y2="476" stroke="#d9d9d9" stroke-width="1" opacity="0.75"/>
+<text x="477.07" y="510" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#111111">3098</text>
+<line x1="604.76" y1="58" x2="604.76" y2="476" stroke="#d9d9d9" stroke-width="1" opacity="0.75"/>
+<text x="604.76" y="510" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#111111">4098</text>
+<line x1="732.45" y1="58" x2="732.45" y2="476" stroke="#d9d9d9" stroke-width="1" opacity="0.75"/>
+<text x="732.45" y="510" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#111111">5098</text>
+<line x1="806.00" y1="58" x2="806.00" y2="476" stroke="#d9d9d9" stroke-width="1" opacity="0.75"/>
+<text x="806.00" y="510" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="18" fill="#111111">5674</text>
+<text x="450.0" y="540" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" fill="#111111">Training iteration</text>
+<text x="27" y="267.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" fill="#d62728" transform="rotate(-90 27 267.0)">D_style</text>
+<text x="818" y="482.00" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="17" fill="#1f77b4">0</text>
+<text x="818" y="261.95" text-anchor="start" font-family="Arial, Helvetica, sans-serif" font-size="17" fill="#1f77b4">0.05</text>
+<text x="874" y="267.0" text-anchor="middle" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" fill="#1f77b4" transform="rotate(90 874 267.0)">D_struct</text>
+<polyline points="94.00,278.68 106.77,247.48 119.54,247.93 132.31,242.34 145.08,235.12 157.85,220.08 170.61,217.57 183.38,211.36 196.15,211.42 208.92,203.48 221.69,204.83 234.46,201.17 247.23,208.40 260.00,204.67 272.77,213.75 285.54,198.55 298.30,209.96 311.07,200.11 323.84,202.04 336.61,193.45 349.38,188.36 362.15,192.94 374.92,207.36 387.69,187.44 400.46,177.78 413.23,187.32 425.99,178.85 438.76,163.48 451.53,159.47 464.30,153.77 477.07,164.38 489.84,165.41 502.61,153.70 515.38,148.89 528.15,152.37 540.92,144.13 553.68,139.96 566.45,132.96 579.22,144.12 591.99,127.72 604.76,120.38 617.53,126.34 630.30,117.95 643.07,114.36 655.84,105.75 668.61,105.79 681.37,106.63 694.14,101.28 706.91,108.15 719.68,104.09 732.45,95.91 745.22,91.47 757.99,92.56 770.76,100.80 783.53,88.96 796.30,94.37 806.00,93.33" fill="none" stroke="#d62728" stroke-width="3.8" stroke-linejoin="round" stroke-linecap="round"/>
+<polyline points="94.00,336.67 106.77,411.25 119.54,423.99 132.31,430.15 145.08,428.00 157.85,428.34 170.61,434.42 183.38,437.00 196.15,442.94 208.92,447.41 221.69,448.90 234.46,442.37 247.23,449.81 260.00,448.13 272.77,447.71 285.54,449.64 298.30,448.59 311.07,450.82 323.84,447.98 336.61,447.50 349.38,447.80 362.15,445.95 374.92,444.51 387.69,445.48 400.46,448.38 413.23,448.47 425.99,447.28 438.76,444.14 451.53,442.26 464.30,445.57 477.07,448.18 489.84,450.64 502.61,445.21 515.38,446.24 528.15,447.62 540.92,449.67 553.68,451.39 566.45,452.87 579.22,446.98 591.99,452.71 604.76,452.91 617.53,454.59 630.30,454.96 643.07,453.56 655.84,453.90 668.61,454.84 681.37,453.84 694.14,454.97 706.91,455.62 719.68,455.59 732.45,457.00 745.22,457.06 757.99,455.76 770.76,456.90 783.53,456.61 796.30,456.09 806.00,456.26" fill="none" stroke="#1f77b4" stroke-width="3.8" stroke-linejoin="round" stroke-linecap="round"/>
+<rect x="572" y="68" width="204" height="86" fill="white" opacity="0.82" stroke="#cccccc" stroke-width="1"/>
+<line x1="586" y1="92" x2="630" y2="92" stroke="#d62728" stroke-width="3.4" stroke-linecap="round"/>
+<text x="644" y="99" font-family="Arial, Helvetica, sans-serif" font-size="20" fill="#111111">D_style</text>
+<line x1="586" y1="126" x2="630" y2="126" stroke="#1f77b4" stroke-width="3.4" stroke-linecap="round"/>
+<text x="644" y="133" font-family="Arial, Helvetica, sans-serif" font-size="20" fill="#111111">D_struct</text>
+</svg>
